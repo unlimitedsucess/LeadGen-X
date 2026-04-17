@@ -275,10 +275,10 @@ export default function Home() {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold flex items-center text-white">
                 <span className="w-2 h-6 bg-accent rounded-full mr-3"></span>
-                Extracted Emails
+                Verified Leads
               </h2>
-              <span className="bg-white/10 text-xs px-3 py-1 rounded-full text-white">
-                {emails.length} found
+              <span className="bg-primary/20 border border-primary/30 text-[10px] px-3 py-1 rounded-full text-primary font-bold tracking-wider uppercase">
+                {emails.length} Validated
               </span>
             </div>
 
@@ -332,15 +332,21 @@ export default function Home() {
                       exit={{ opacity: 0, scale: 0.9 }}
                       transition={{ delay: idx % 10 * 0.05 }}
                       onClick={() => toggleEmailSelection(email)}
-                      className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                      className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between group ${
                         selectedEmails.has(email)
                           ? "bg-primary/20 border-primary shadow-[0_0_15px_rgba(59,130,246,0.15)]"
                           : "bg-surface/50 border-surface-border hover:bg-white/5"
                       }`}
                     >
-                      <span className="text-sm text-gray-200 truncate">{email}</span>
+                      <div className="flex flex-col">
+                        <span className="text-sm text-gray-200 truncate">{email}</span>
+                        <span className="text-[10px] text-primary/70 font-medium flex items-center mt-1">
+                          <CheckCircle2 className="w-3 h-3 mr-1" />
+                          MX Verified
+                        </span>
+                      </div>
                       <div className={`w-5 h-5 rounded-full flex items-center justify-center border transition-colors ${
-                        selectedEmails.has(email) ? "border-primary bg-primary" : "border-gray-500"
+                        selectedEmails.has(email) ? "border-primary bg-primary" : "border-gray-500 group-hover:border-primary/50"
                       }`}>
                         {selectedEmails.has(email) && <CheckCircle2 className="w-3 h-3 text-white" />}
                       </div>
