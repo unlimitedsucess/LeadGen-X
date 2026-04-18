@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Loader2, Send, Mail, CheckCircle2, ChevronRight, Settings } from "lucide-react";
+import { Search, Loader2, Send, Mail, CheckCircle2, ChevronRight, Settings, Plus, Save } from "lucide-react";
+import Link from 'next/link';
 
 export default function Home() {
   const [keywords, setKeywords] = useState("");
@@ -23,14 +24,23 @@ export default function Home() {
   const [searchQueryInfo, setSearchQueryInfo] = useState("");
   const [customEmail, setCustomEmail] = useState("");
 
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [smtpEmail, setSmtpEmail] = useState("");
-  const [smtpPassword, setSmtpPassword] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [savedEmails, setSavedEmails] = useState<string[]>([]);
 
-  const [showSmtpSettings, setShowSmtpSettings] = useState(false);
+  // Load saved emails on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("saved_emails");
+    if (saved) setSavedEmails(JSON.parse(saved));
+  }, []);
+
+  const handleSaveToMailer = () => {
+    if (selectedEmails.size === 0) return;
+    const currentSaved = JSON.parse(localStorage.getItem("saved_emails") || "[]");
+    const newSaved = Array.from(new Set([...currentSaved, ...Array.from(selectedEmails)]));
+    setSavedEmails(newSaved);
+    localStorage.setItem("saved_emails", JSON.stringify(newSaved));
+    alert(`${selectedEmails.size} emails saved for your campaign!`);
+    setSelectedEmails(new Set());
+  };
 
   const handleSearch = async (isLoadMore = false) => {
     if (!keywords) return;
@@ -133,60 +143,8 @@ export default function Home() {
     setCustomEmail(""); // Clear input
   };
 
-  const handleSendEmail = async () => {
-    if (selectedEmails.size === 0) {
-      alert("Please select at least one email.");
-      return;
-    }
-    if (!smtpEmail || !smtpPassword) {
-      setShowSmtpSettings(true);
-      alert("Please configure your SMTP credentials.");
-      return;
-    }
 
-    setSending(true);
-    setSendResult(null);
 
-    try {
-      const res = await fetch("/api/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          emails: Array.from(selectedEmails),
-          subject,
-          body,
-          smtpEmail,
-          smtpPassword,
-        }),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Email send server error:", errorText.substring(0, 1000));
-        setSendResult({ success: false, message: "Server error while sending emails." });
-        return;
-      }
-
-      const contentType = res.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await res.text();
-        console.error("Email send non-JSON response:", text.substring(0, 500));
-        setSendResult({ success: false, message: "Invalid server response while sending emails." });
-        return;
-      }
-
-      const data = await res.json();
-      setSendResult({
-        success: data.success,
-        message: data.success ? data.message : data.error || "Failed to send",
-      });
-    } catch (err: any) {
-      console.error("Email send catch error:", err);
-      setSendResult({ success: false, message: err.message || "An error occurred" });
-    } finally {
-      setSending(false);
-    }
-  };
 
   return (
     <main className="max-w-7xl mx-auto p-4 md:p-8 pt-12">
@@ -405,14 +363,24 @@ export default function Home() {
             </div>
 
             {emails.length > 0 && (
-              <button
-                onClick={() => handleSearch(true)}
-                disabled={loading}
-                className="mt-6 w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-colors flex items-center justify-center disabled:opacity-50"
-              >
-                {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ChevronRight className="w-4 h-4 mr-1" />}
-                Load More Results
-              </button>
+              <div className="flex gap-2 mt-6">
+                <button
+                  onClick={() => handleSearch(true)}
+                  disabled={loading}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-colors flex items-center justify-center disabled:opacity-50"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+                  More
+                </button>
+                <button
+                  onClick={handleSaveToMailer}
+                  disabled={selectedEmails.size === 0}
+                  className="flex-[2] py-3 bg-primary hover:opacity-90 rounded-xl text-white text-sm font-semibold transition-all flex items-center justify-center disabled:opacity-50 shadow-lg shadow-primary/20"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  Save {selectedEmails.size} Leads
+                </button>
+              </div>
             )}
             {searchQueryInfo && (
               <p className="mt-4 text-xs text-gray-500 break-all border-t border-white/10 pt-4">
@@ -422,115 +390,61 @@ export default function Home() {
           </div>
         </motion.div>
 
-        {/* Right Column: Bulk Mailer */}
+        {/* Right Column: Collection Summary */}
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.5 }}
           className="lg:col-span-4"
         >
-          <div className="glass-panel rounded-2xl p-6 relative overflow-hidden">
-            <h2 className="text-xl font-semibold mb-6 flex items-center justify-between text-white">
-              <div className="flex items-center">
-                <span className="w-2 h-6 bg-pink-500 rounded-full mr-3"></span>
-                Bulk Mailer
-              </div>
-              <button 
-                onClick={() => setShowSmtpSettings(!showSmtpSettings)}
-                className="text-gray-400 hover:text-white transition-colors"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
+          <div className="glass-panel rounded-2xl p-6 relative overflow-hidden h-full flex flex-col">
+            <div className="absolute top-0 right-0 p-8 opacity-5">
+              <Mail className="w-32 h-32 rotate-12" />
+            </div>
+
+            <h2 className="text-xl font-semibold mb-6 flex items-center text-white relative z-10">
+              <span className="w-2 h-6 bg-pink-500 rounded-full mr-3"></span>
+              Campaign Hub
             </h2>
 
-            <AnimatePresence>
-              {showSmtpSettings && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden mb-6"
-                >
-                  <div className="p-4 bg-black/40 rounded-xl border border-white/10 space-y-4">
-                    <p className="text-xs text-gray-400 mb-2">Configure Gmail SMTP. You must use an App Password, NOT your standard Google password.</p>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-300 mb-1">Gmail Address</label>
-                      <input
-                        type="email"
-                        value={smtpEmail}
-                        onChange={(e) => setSmtpEmail(e.target.value)}
-                        placeholder="you@gmail.com"
-                        className="w-full bg-input/80 border border-surface-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary/50"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-300 mb-1">App Password</label>
-                      <input
-                        type="password"
-                        value={smtpPassword}
-                        onChange={(e) => setSmtpPassword(e.target.value)}
-                        placeholder="16-digit app password"
-                        className="w-full bg-input/80 border border-surface-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary/50"
-                      />
-                    </div>
+            <div className="flex-1 relative z-10">
+              <div className="p-6 bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 rounded-2xl mb-6">
+                <p className="text-gray-400 text-sm mb-1">Total Saved Contacts</p>
+                <h3 className="text-5xl font-bold text-white mb-2">{savedEmails.length}</h3>
+                <p className="text-xs text-green-400 flex items-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 mr-2 animate-pulse"></span>
+                  Ready for outreach
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-lg bg-pink-500/20 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-4 h-4 text-pink-500" />
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Recipients ({selectedEmails.size})</label>
-                <div className="w-full bg-black/20 border border-surface-border rounded-xl px-4 py-3 text-sm text-gray-400 min-h-[48px] overflow-hidden whitespace-nowrap text-ellipsis">
-                  {selectedEmails.size > 0
-                    ? Array.from(selectedEmails).join(", ")
-                    : "No recipients selected"}
+                  <div>
+                    <p className="text-sm font-medium text-gray-200">Verified Quality</p>
+                    <p className="text-xs text-gray-500">Every saved lead passes MX validation before joining your list.</p>
+                  </div>
+                </div>
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0">
+                    <Plus className="w-4 h-4 text-purple-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-200">Continuous Growth</p>
+                    <p className="text-xs text-gray-500">Search multiple keywords to build a massive target database.</p>
+                  </div>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Subject</label>
-                <input
-                  type="text"
-                  placeholder="Compelling subject line..."
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  className="w-full bg-input/50 border border-surface-border rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Message Body</label>
-                <textarea
-                  placeholder="Hello there!\n\nI noticed your profile..."
-                  rows={8}
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  className="w-full bg-input/50 border border-surface-border rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all text-sm resize-none custom-scrollbar"
-                ></textarea>
-              </div>
-
-              {sendResult && (
-                <div className={`p-3 rounded-lg text-sm ${sendResult.success ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
-                  {sendResult.message}
-                </div>
-              )}
-
-              <button
-                onClick={handleSendEmail}
-                disabled={sending || selectedEmails.size === 0 || !subject || !body}
-                className="w-full py-4 mt-2 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-90 disabled:opacity-50 disabled:grayscale transition-all rounded-xl text-white font-medium shadow-lg shadow-pink-500/20 flex justify-center items-center"
-              >
-                {sending ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <>
-                    <Send className="w-4 h-4 mr-2" />
-                    Dispatch emails
-                  </>
-                )}
-              </button>
             </div>
+
+            <Link href="/mailer" className="mt-8 relative z-10">
+              <button className="w-full py-4 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-90 transition-all rounded-xl text-white font-bold shadow-xl shadow-pink-500/20 flex justify-center items-center group">
+                Go to Mailer Dashboard
+                <ChevronRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </Link>
           </div>
         </motion.div>
       </div>

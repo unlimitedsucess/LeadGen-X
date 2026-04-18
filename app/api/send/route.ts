@@ -8,7 +8,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     console.log("POST /api/send - BODY PARSED");
-    const { emails, subject, body: emailContent, smtpEmail, smtpPassword } = body;
+    const { emails, subject, body: emailContent, smtpEmail, smtpPassword, replyTo, senderName } = body;
 
     if (!emails || !emails.length) {
       return NextResponse.json({ success: false, error: 'No emails provided.' }, { status: 400 });
@@ -36,11 +36,11 @@ export async function POST(req: Request) {
 
     const emailPromises = emails.map((recipient: string) => {
       return transporter.sendMail({
-        from: smtpEmail,
+        from: senderName ? `"${senderName}" <${smtpEmail}>` : smtpEmail,
         to: recipient,
+        replyTo: replyTo || smtpEmail,
         subject: subject,
-        text: emailContent, // plain text body
-        // html: emailContent // could optionally add HTML body
+        text: emailContent, 
       });
     });
 
