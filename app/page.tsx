@@ -63,6 +63,21 @@ export default function Home() {
         }),
       });
 
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Server error:", errorText.substring(0, 1000));
+        alert("Server error. Check console for details.");
+        return;
+      }
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        console.error("Non-JSON response received:", text.substring(0, 500));
+        alert("Received invalid response from server (HTML instead of JSON).");
+        return;
+      }
+
       const data = await res.json();
       if (data.success) {
         if (isLoadMore) {
@@ -72,9 +87,12 @@ export default function Home() {
         }
         setPage(currentPage);
         setSearchQueryInfo(data.query);
+      } else {
+        alert("Search failed: " + (data.error || "Unknown error"));
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to search", error);
+      alert("Search failed: " + (error?.message || "Check network connection"));
     } finally {
       setLoading(false);
     }
@@ -142,12 +160,28 @@ export default function Home() {
         }),
       });
 
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Email send server error:", errorText.substring(0, 1000));
+        setSendResult({ success: false, message: "Server error while sending emails." });
+        return;
+      }
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        console.error("Email send non-JSON response:", text.substring(0, 500));
+        setSendResult({ success: false, message: "Invalid server response while sending emails." });
+        return;
+      }
+
       const data = await res.json();
       setSendResult({
         success: data.success,
         message: data.success ? data.message : data.error || "Failed to send",
       });
     } catch (err: any) {
+      console.error("Email send catch error:", err);
       setSendResult({ success: false, message: err.message || "An error occurred" });
     } finally {
       setSending(false);

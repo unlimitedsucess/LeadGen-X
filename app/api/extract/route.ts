@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
-// @ts-ignore
+// @ts-expect-error google-it might not have types
 import googleIt from 'google-it';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import dns from 'dns/promises';
+import dns from 'node:dns/promises';
+
+console.log("EXTRACT ROUTE LOADED");
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -134,9 +136,25 @@ async function fetchWebsiteContent(url: string) {
   }
 }
 
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
+  console.log("POST /api/extract - START");
   try {
-    const { keywords, location, source, emailProviders, allowCompanyDomain, page = 1 } = await req.json();
+    const rawBody = await req.text();
+    if (!rawBody) {
+      return NextResponse.json({ success: false, error: 'Empty request body' }, { status: 400 });
+    }
+    
+    let body;
+    try {
+      body = JSON.parse(rawBody);
+    } catch (e) {
+      return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    console.log("POST /api/extract - BODY PARSED", Object.keys(body));
+    const { keywords, location, source, emailProviders, allowCompanyDomain, page = 1 } = body;
     
     const isGenericSearch = allowCompanyDomain === true || (!emailProviders || emailProviders.length === 0);
     const providerQuery = isGenericSearch ? "" : emailProviders.map((provider: string) => `"${provider}"`).join(' OR ');

@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
+  console.log("POST /api/send - START");
   try {
-    const { emails, subject, body, smtpEmail, smtpPassword } = await req.json();
+    const body = await req.json();
+    console.log("POST /api/send - BODY PARSED");
+    const { emails, subject, body: emailContent, smtpEmail, smtpPassword } = body;
 
     if (!emails || !emails.length) {
       return NextResponse.json({ success: false, error: 'No emails provided.' }, { status: 400 });
@@ -34,8 +39,8 @@ export async function POST(req: Request) {
         from: smtpEmail,
         to: recipient,
         subject: subject,
-        text: body, // plain text body
-        // html: body // could optionally add HTML body
+        text: emailContent, // plain text body
+        // html: emailContent // could optionally add HTML body
       });
     });
 
