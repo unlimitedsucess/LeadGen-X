@@ -122,51 +122,85 @@ function extractEmailsFromText(text: string, providers: string[]) {
   return Array.from(emails);
 }
 
+async function fetchWebsiteContent(url: string) {
+  try {
+    const res = await axios.get(url, { 
+      headers: { 'User-Agent': USER_AGENT },
+      timeout: 5000 // Short timeout to keep things fast
+    });
+    return res.data;
+  } catch (e) {
+    return "";
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const { keywords, location, source, emailProviders, page = 1 } = await req.json();
-    const providerQuery = emailProviders.map((provider: string) => `"${provider}"`).join(' OR ');
+    const { keywords, location, source, emailProviders, allowCompanyDomain, page = 1 } = await req.json();
+    
+    const isGenericSearch = allowCompanyDomain === true || (!emailProviders || emailProviders.length === 0);
+    const providerQuery = isGenericSearch ? "" : emailProviders.map((provider: string) => `"${provider}"`).join(' OR ');
 
-    console.log("Starting massive multi-engine extraction. Source:", source);
-
-    const professionalKeywords = ["developer", "manager", "engineer", "sales", "expert", "consultant", "director", "owner", "partner"];
-    const allKeywords = [keywords, ...professionalKeywords.map(pw => keywords + " " + pw)];
+    console.log("Starting ULTIMATE ENGINE. Keywords:", keywords, "Loc:", location);
 
     const fetches = [];
     
-    // 1. PRIMARY SEARCH ENGINE: Google (Best Quality)
-    fetches.push(fetchGoogle(`site:linkedin.com/in "${keywords}" ${location} ${providerQuery}`));
-    
-    // 2. SOCIAL MEDIA / NICHE ENGINES
-    const sites = source === 'linkedin' 
-      ? ['site:linkedin.com/in', 'site:linkedin.com/pub'] 
-      : source === 'github' 
-        ? ['site:github.com'] 
-        : ['site:linkedin.com/in', 'site:facebook.com', 'site:twitter.com'];
+    // -- STAGE 1: SEARCH ENGINE DISCOVERY (DEEP) --
+    const searchTasks = [
+      `site:linkedin.com/in "${keywords}" ${location} ${providerQuery}`,
+      `site:facebook.com "${keywords}" ${location} "email" ${providerQuery}`,
+      `site:instagram.com "${keywords}" ${location} "contact" ${providerQuery}`,
+      `"${keywords}" ${location} "official website"`,
+      `"${keywords}" ${location} company directory email`,
+      `"${keywords}" ${location} list of business emails`
+    ];
 
-    for (const site of sites) {
-      const keywordToUse = allKeywords[Math.floor(Math.random() * allKeywords.length)];
-      const q = `${site} "${keywordToUse}" ${location} (${providerQuery})`;
-      fetches.push(fetchDDGSearch(q));
-      fetches.push(fetchYahoo(q));
-      fetches.push(fetchBing(q));
+    // Recursive depth: 3 pages for main queries
+    for (let i = 0; i < 3; i++) {
+      const offset = i * 10;
+      
+      // Google Fallback Logic
+      fetches.push(fetchGoogle(searchTasks[0]).catch(() => ""));
+      fetches.push(fetchGoogle(searchTasks[3]).catch(() => ""));
+
+      // Direct Scraping (Yahoo/Bing/DDG)
+      const qMix = searchTasks[i % searchTasks.length];
+      fetches.push(fetchYahoo(`${qMix}&b=${offset + 1}`).catch(() => ""));
+      fetches.push(fetchBing(`${qMix}&first=${offset + 1}`).catch(() => ""));
+      fetches.push(fetchDDGSearch(qMix).catch(() => ""));
     }
 
-    // 3. GITHUB API (If applicable or as fallback)
-    fetches.push(fetchGithubCommits(`${keywords} ${location}`, emailProviders, page).then(arr => arr.join(" ")));
-    fetches.push(fetchGithubCommits(`${allKeywords[1]} ${location}`, emailProviders, page).then(arr => arr.join(" ")));
+    // -- STAGE 2: GITHUB PRIMARY DATA --
+    fetches.push(fetchGithubCommits(`${keywords} ${location}`, emailProviders.length ? emailProviders : ["@"], 1).then(a => a.join(" ")));
+    fetches.push(fetchGithubCommits(`${keywords}`, emailProviders.length ? emailProviders : ["@"], 2).then(a => a.join(" ")));
 
-    // 4. GENERAL WEB SCRAPING
-    fetches.push(fetchDDGSearch(`"contact email" ${keywords} ${location} (${providerQuery})`));
-    fetches.push(fetchYahoo(`"${keywords}" ${location} email list "gmail.com"`));
+    // -- STAGE 3: LIVE WEBSITE CRAWLING (For verified business info) --
+    // We try to scrape the first 5 websites that look like official company pages
+    try {
+      const discoveryResults = await googleIt({ query: `"${keywords}" ${location} website`, limit: 10 }).catch(() => []);
+      const links = discoveryResults.map((r: any) => r.link).filter((l: string) => l && l.startsWith('http'));
+      
+      links.slice(0, 5).forEach((url: string) => {
+        fetches.push(fetchWebsiteContent(url).then(async content => {
+          if (content && content.includes('contact')) {
+             return content + " " + (await fetchWebsiteContent(url + "/contact").catch(() => ""));
+          }
+          return content;
+        }));
+      });
+    } catch (e) {
+      console.log("Skipping dynamic crawl due to engine block");
+    }
 
     const textResults = await Promise.all(fetches);
     const combinedText = textResults.join(" ");
 
-    let extractedEmails = extractEmailsFromText(combinedText, emailProviders);
+    // -- STAGE 4: EXTRACTION & VERIFICATION --
+    const effectiveProviders = isGenericSearch ? ["@"] : emailProviders;
+    let extractedEmails = extractEmailsFromText(combinedText, effectiveProviders);
     extractedEmails = Array.from(new Set(extractedEmails));
 
-    console.log(`Verifying ${extractedEmails.length} unique emails found...`);
+    console.log(`Ultimate Engine found ${extractedEmails.length} candidates. Verifying...`);
     
     const verificationResults = await Promise.all(
       extractedEmails.map(async (email) => {
@@ -176,7 +210,7 @@ export async function POST(req: Request) {
     );
 
     const verifiedEmails = verificationResults.filter((e): e is string => e !== null);
-    console.log(`Extraction complete. Found ${verifiedEmails.length} verified leads.`);
+    console.log(`SUCCESS: ${verifiedEmails.length} verified leads found.`);
 
     return NextResponse.json({ 
         success: true, 
@@ -186,9 +220,12 @@ export async function POST(req: Request) {
     });
 
   } catch (error) {
-    console.error('Unified Extraction Error:', error);
-    return NextResponse.json({ success: false, error: 'Failed' }, { status: 500 });
+    console.error('Ultimate Engine Crash:', error);
+    return NextResponse.json({ success: false, error: 'Engine error' }, { status: 500 });
   }
 }
+
+
+
 
 

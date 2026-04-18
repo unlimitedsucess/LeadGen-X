@@ -10,9 +10,10 @@ export default function Home() {
   const [source, setSource] = useState("linkedin");
   const [providers, setProviders] = useState({
     gmail: true,
-    yahoo: true,
+    yahoo: false,
     hotmail: false,
     outlook: false,
+    company: true,
   });
 
   const [loading, setLoading] = useState(false);
@@ -42,8 +43,11 @@ export default function Home() {
     }
 
     const activeProviders = Object.entries(providers)
-      .filter(([_, active]) => active)
+      .filter(([key, active]) => active && key !== 'company')
       .map(([key]) => `@${key}.com`);
+    
+    // If company is selected, we allow '@' (which matches all domains)
+    const allowCompanyDomain = providers.company;
 
     try {
       const res = await fetch("/api/extract", {
@@ -53,7 +57,8 @@ export default function Home() {
           keywords,
           location,
           source,
-          emailProviders: activeProviders.length ? activeProviders : ["@gmail.com"],
+          emailProviders: activeProviders,
+          allowCompanyDomain: allowCompanyDomain,
           page: currentPage,
         }),
       });
@@ -228,9 +233,18 @@ export default function Home() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Email Providers</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Target Providers</label>
                 <div className="grid grid-cols-2 gap-3">
-                  {Object.entries(providers).map(([key, value]) => (
+                  <label className="flex items-center space-x-2 cursor-pointer p-2 rounded-lg bg-primary/10 border border-primary/20 hover:bg-primary/20 transition-colors col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={providers.company}
+                      onChange={() => setProviders({ ...providers, company: !providers.company })}
+                      className="w-4 h-4 rounded border-gray-600 text-primary focus:ring-primary bg-input"
+                    />
+                    <span className="text-white font-medium text-sm">Official / Company Domains</span>
+                  </label>
+                  {Object.entries(providers).filter(([key]) => key !== 'company').map(([key, value]) => (
                     <label key={key} className="flex items-center space-x-2 cursor-pointer p-2 rounded-lg hover:bg-white/5 transition-colors">
                       <input
                         type="checkbox"
