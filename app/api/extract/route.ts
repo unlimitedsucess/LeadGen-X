@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 // @ts-expect-error google-it might not have types
 import googleIt from 'google-it';
-// @ts-expect-error google-sr might not have types
-import { search as googleSearch } from 'google-sr';
+import { search as googleSearch, OrganicResult } from 'google-sr';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import dns from 'node:dns/promises';
@@ -33,7 +32,8 @@ async function fetchGoogleSR(query: string) {
   try {
     const results = await googleSearch({ 
        query,
-       safe: false
+       parsers: [OrganicResult],
+       noPartialResults: true
     });
     return results.map(r => `${r.title} ${r.description}`).join(" ");
   } catch (e) {
