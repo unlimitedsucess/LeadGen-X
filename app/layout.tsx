@@ -27,6 +27,9 @@ export default function RootLayout({
               <Link href="/" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">
                 Extractions
               </Link>
+              <Link href="/vault" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">
+                Leads Vault
+              </Link>
               <Link href="/mailer" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">
                 Mailer Dashboard
               </Link>

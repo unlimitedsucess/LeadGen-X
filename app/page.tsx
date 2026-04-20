@@ -2,8 +2,14 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Loader2, Send, Mail, CheckCircle2, ChevronRight, Settings, Plus, Save } from "lucide-react";
+import { Search, Loader2, Send, Mail, CheckCircle2, ChevronRight, Settings, Plus, Save, Copy } from "lucide-react";
 import Link from 'next/link';
+
+interface EmailFolder {
+  id: string;
+  name: string;
+  emails: string[];
+}
 
 export default function Home() {
   const [keywords, setKeywords] = useState("");
@@ -25,21 +31,79 @@ export default function Home() {
   const [customEmail, setCustomEmail] = useState("");
 
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
+  const [folders, setFolders] = useState<EmailFolder[]>([]);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [savingToFolder, setSavingToFolder] = useState(false);
 
-  // Load saved emails on mount
+  // Load saved emails and folders on mount
   useEffect(() => {
     const saved = localStorage.getItem("saved_emails");
     if (saved) setSavedEmails(JSON.parse(saved));
+
+    const storedFolders = localStorage.getItem("email_folders");
+    if (storedFolders) {
+      setFolders(JSON.parse(storedFolders));
+    } else {
+      const initialFolders = [{ id: "uncategorized", name: "Uncategorized", emails: saved ? JSON.parse(saved) : [] }];
+      setFolders(initialFolders);
+      localStorage.setItem("email_folders", JSON.stringify(initialFolders));
+    }
   }, []);
 
-  const handleSaveToMailer = () => {
+  const handleSaveToSpecificFolder = (folderId: string) => {
     if (selectedEmails.size === 0) return;
-    const currentSaved = JSON.parse(localStorage.getItem("saved_emails") || "[]");
-    const newSaved = Array.from(new Set([...currentSaved, ...Array.from(selectedEmails)]));
-    setSavedEmails(newSaved);
-    localStorage.setItem("saved_emails", JSON.stringify(newSaved));
-    alert(`${selectedEmails.size} emails saved for your campaign!`);
+    
+    const storedFolders = JSON.parse(localStorage.getItem("email_folders") || "[]");
+    const updatedFolders = storedFolders.map((f: EmailFolder) => {
+      if (f.id === folderId) {
+        return { ...f, emails: Array.from(new Set([...f.emails, ...Array.from(selectedEmails)])) };
+      }
+      return f;
+    });
+
+    const targetFolder = updatedFolders.find((f: EmailFolder) => f.id === folderId);
+    
+    // Update all relevant state and storage
+    localStorage.setItem("email_folders", JSON.stringify(updatedFolders));
+    setFolders(updatedFolders);
+    
+    // Also sync the flat list for compatibility
+    const allEmails: string[] = Array.from(new Set(updatedFolders.flatMap((f: EmailFolder) => f.emails)));
+    localStorage.setItem("saved_emails", JSON.stringify(allEmails));
+    setSavedEmails(allEmails);
+    
+    setIsSaveModalOpen(false);
     setSelectedEmails(new Set());
+    alert(`${selectedEmails.size} leads successfully saved to "${targetFolder?.name}"!`);
+  };
+
+  const handleCreateAndSave = () => {
+    if (!newFolderName.trim()) return;
+    
+    const storedFolders = JSON.parse(localStorage.getItem("email_folders") || "[]");
+    const newFolder = {
+      id: Date.now().toString(),
+      name: newFolderName.trim(),
+      emails: Array.from(selectedEmails)
+    };
+    
+    const updatedFolders = [...storedFolders, newFolder];
+    localStorage.setItem("email_folders", JSON.stringify(updatedFolders));
+    setFolders(updatedFolders);
+    
+    const allEmails: string[] = Array.from(new Set(updatedFolders.flatMap((f: EmailFolder) => f.emails)));
+    localStorage.setItem("saved_emails", JSON.stringify(allEmails));
+    setSavedEmails(allEmails);
+    
+    setNewFolderName("");
+    setIsSaveModalOpen(false);
+    setSelectedEmails(new Set());
+    alert(`New folder "${newFolder.name}" created and leads saved!`);
+  };
+
+  const handleSaveToMailer = () => {
+    handleSaveToSpecificFolder("uncategorized");
   };
 
   const handleSearch = async (isLoadMore = false) => {
@@ -365,6 +429,20 @@ export default function Home() {
             {emails.length > 0 && (
               <div className="flex gap-2 mt-6">
                 <button
+                  onClick={async () => {
+                    const text = Array.from(selectedEmails).join("\n");
+                    await navigator.clipboard.writeText(text);
+                    alert(`${selectedEmails.size} emails copied to clipboard!`);
+                    setSelectedEmails(new Set());
+                  }}
+                  disabled={selectedEmails.size === 0}
+                  className="px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-xs font-bold transition-all flex items-center justify-center disabled:opacity-50"
+                  title="Copy selected to clipboard"
+                >
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy
+                </button>
+                <button
                   onClick={() => handleSearch(true)}
                   disabled={loading}
                   className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-colors flex items-center justify-center disabled:opacity-50"
@@ -372,14 +450,16 @@ export default function Home() {
                   {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ChevronRight className="w-4 h-4 mr-1" />}
                   More
                 </button>
-                <button
-                  onClick={handleSaveToMailer}
-                  disabled={selectedEmails.size === 0}
-                  className="flex-[2] py-3 bg-primary hover:opacity-90 rounded-xl text-white text-sm font-semibold transition-all flex items-center justify-center disabled:opacity-50 shadow-lg shadow-primary/20"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  Save {selectedEmails.size} Leads
-                </button>
+                <div className="flex-[2]">
+                  <button
+                    onClick={() => setIsSaveModalOpen(true)}
+                    disabled={selectedEmails.size === 0}
+                    className="w-full h-full py-4 bg-primary hover:shadow-[0_0_20px_rgba(59,130,246,0.3)] rounded-xl text-white font-bold transition-all flex items-center justify-center disabled:opacity-50 disabled:shadow-none shadow-lg shadow-primary/20 group"
+                  >
+                    <Save className="w-5 h-5 mr-2 group-hover:scale-110 transition-transform" />
+                    Save {selectedEmails.size} Selected Leads
+                  </button>
+                </div>
               </div>
             )}
             {searchQueryInfo && (
@@ -448,6 +528,94 @@ export default function Home() {
           </div>
         </motion.div>
       </div>
+
+      {/* Save Leads Modal */}
+      <AnimatePresence>
+        {isSaveModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSaveModalOpen(false)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-lg bg-[#0a0a0a] border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-primary/10"
+            >
+              <div className="p-8 pb-0">
+                <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mb-6">
+                  <Save className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="text-2xl font-bold text-white mb-2">Save {selectedEmails.size} Leads</h3>
+                <p className="text-gray-500 text-sm mb-8">Choose an existing folder or create a new one to organize your leads.</p>
+              </div>
+
+              <div className="p-8 pt-0 space-y-8">
+                {/* Existing Folders */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Existing Folders</label>
+                  <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                    {folders.map(folder => (
+                      <button
+                        key={folder.id}
+                        onClick={() => handleSaveToSpecificFolder(folder.id)}
+                        className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-primary/10 border border-white/5 hover:border-primary/30 rounded-2xl transition-all group"
+                      >
+                        <div className="flex items-center">
+                          <div className="p-2 bg-white/5 rounded-lg mr-3 group-hover:bg-primary/20">
+                            <Plus className="w-4 h-4 text-gray-400 group-hover:text-primary" />
+                          </div>
+                          <span className="text-white font-medium">{folder.name}</span>
+                        </div>
+                        <span className="text-xs font-bold text-gray-600 bg-black/40 px-2.5 py-1 rounded-full group-hover:text-primary group-hover:bg-primary/10 transition-colors">
+                          {folder.emails.length} stored
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="h-[1px] bg-white/5 w-full" />
+
+                {/* Create New Folder */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Or Create New Folder</label>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      placeholder="Folder name..."
+                      onKeyDown={(e) => e.key === 'Enter' && handleCreateAndSave()}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                    />
+                    <button
+                      onClick={handleCreateAndSave}
+                      disabled={!newFolderName.trim()}
+                      className="px-6 py-3 bg-white text-black font-bold rounded-xl hover:opacity-90 disabled:opacity-50 transition-all flex items-center"
+                    >
+                      Create & Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-white/5 border-t border-white/5 flex justify-end">
+                <button
+                  onClick={() => setIsSaveModalOpen(false)}
+                  className="px-6 py-2 text-sm font-bold text-gray-500 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <style jsx global>{`
         @keyframes shine {

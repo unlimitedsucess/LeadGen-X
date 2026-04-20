@@ -17,8 +17,16 @@ import {
 } from "lucide-react";
 import Link from 'next/link';
 
+interface EmailFolder {
+  id: string;
+  name: string;
+  emails: string[];
+}
+
 export default function MailerPage() {
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
+  const [folders, setFolders] = useState<EmailFolder[]>([]);
+  const [activeFolderId, setActiveFolderId] = useState<string>("all");
   const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -40,8 +48,12 @@ export default function MailerPage() {
     if (saved) {
       const parsed = JSON.parse(saved);
       setSavedEmails(parsed);
-      // Auto-select all by default for convenience
       setSelectedRecipients(new Set(parsed));
+    }
+
+    const storedFolders = localStorage.getItem("email_folders");
+    if (storedFolders) {
+      setFolders(JSON.parse(storedFolders));
     }
     
     // Load last used SMTP settings if any
@@ -53,7 +65,13 @@ export default function MailerPage() {
     if (lastReplyTo) setReplyTo(lastReplyTo);
   }, []);
 
-  const filteredEmails = savedEmails.filter(email => 
+  const getEmailsToDisplay = () => {
+    if (activeFolderId === "all") return savedEmails;
+    const folder = folders.find(f => f.id === activeFolderId);
+    return folder ? folder.emails : [];
+  };
+
+  const filteredEmails = getEmailsToDisplay().filter((email: string) => 
     email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -324,13 +342,35 @@ export default function MailerPage() {
               </div>
 
               <div className="p-6 pb-0">
+                <div className="flex gap-2 overflow-x-auto pb-4 mb-2 custom-scrollbar scrollbar-none">
+                  <button
+                    onClick={() => setActiveFolderId("all")}
+                    className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                      activeFolderId === "all" ? "bg-primary text-white" : "bg-white/5 text-gray-400 hover:bg-white/10"
+                    }`}
+                  >
+                    All Leads ({savedEmails.length})
+                  </button>
+                  {folders.map(folder => (
+                    <button
+                      key={folder.id}
+                      onClick={() => setActiveFolderId(folder.id)}
+                      className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                        activeFolderId === folder.id ? "bg-primary text-white" : "bg-white/5 text-gray-400 hover:bg-white/10"
+                      }`}
+                    >
+                      {folder.name} ({folder.emails.length})
+                    </button>
+                  ))}
+                </div>
+
                 <div className="relative mb-6">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search through saved leads..."
+                    placeholder="Search leads..."
                     className="w-full bg-white/5 border border-white/5 rounded-xl pl-11 pr-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
                   />
                 </div>

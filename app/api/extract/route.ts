@@ -19,12 +19,16 @@ async function verifyEmailDomain(email: string): Promise<boolean> {
   const domain = email.split('@')[1];
   if (!domain) return false;
   try {
-    // Add a race to prevent hanging on slow DNS servers
-    const timeout = new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('DNS Timeout')), 2000));
+    const timeout = new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('DNS Timeout')), 3000));
     const resolution = dns.resolveMx(domain).then(mx => mx && mx.length > 0);
     return await Promise.race([resolution, timeout]);
   } catch (e) {
-    return false;
+    try {
+      const a = await dns.resolve(domain);
+      return a && a.length > 0;
+    } catch (err) {
+      return false;
+    }
   }
 }
 
