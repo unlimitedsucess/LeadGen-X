@@ -127,11 +127,16 @@ export default function VaultPage() {
       });
       const data = await res.json();
       if (data.success) {
-        const valid = new Set<string>();
-        data.results.forEach((r: any) => {
-          if (r.isValid) valid.add(r.email);
-        });
-        setVerifiedEmails(valid);
+        const validList = data.results
+          .filter((r: any) => r.isValid)
+          .map((r: any) => r.email);
+        
+        setExtractedFromPaste(validList);
+        setVerifiedEmails(new Set(validList));
+        
+        if (validList.length === 0) {
+          alert("No registered mailbox domains found in this list.");
+        }
       }
     } catch (e) {
       console.error("Verification failed", e);
@@ -141,7 +146,20 @@ export default function VaultPage() {
   };
 
   const handleAddVerifiedToFolder = () => {
-    const toAdd = extractedFromPaste; // We add all, but verified will be visually distinct
+    if (verifying) return;
+    
+    const wasVerified = verifiedEmails.size > 0;
+    const toAdd = wasVerified ? Array.from(verifiedEmails) : [];
+
+    if (toAdd.length === 0) {
+      if (extractedFromPaste.length > 0 && !wasVerified) {
+        alert("Please click 'Verify Domains' to ensure these are registered emails first.");
+      } else {
+        alert("No valid, registered emails were found to save.");
+      }
+      return;
+    }
+
     const updatedFolders = folders.map(f => {
       if (f.id === activeFolderId) {
         return { ...f, emails: Array.from(new Set([...f.emails, ...toAdd])) };
@@ -152,6 +170,7 @@ export default function VaultPage() {
     setIsImportOpen(false);
     setPastedText("");
     setExtractedFromPaste([]);
+    setVerifiedEmails(new Set()); // Clear verification state
   };
 
   const toggleEmailSelection = (email: string) => {
@@ -451,7 +470,9 @@ export default function VaultPage() {
                       </div>
                       <div className="flex items-center gap-4">
                         <span className="text-[10px] text-green-500/70 font-bold bg-green-500/10 px-2 py-0.5 rounded-full flex items-center uppercase tracking-tighter">
-                          <CheckCircle2 className="w-2 h-2 mr-1" /> Verified
+                          <CheckCircle2 className="w-2 h-2 mr-1" /> 
+                          {/* We assume emails in the vault are verified if they came from extraction or import with verify */}
+                          MX Verified
                         </span>
                         <MoreVertical className="w-4 h-4 text-gray-700 hover:text-gray-400 shrink-0" />
                       </div>
@@ -485,9 +506,9 @@ export default function VaultPage() {
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center">
                     <ClipboardPaste className="w-5 h-5 mr-3 text-primary" />
-                    Bulk Import & Verify
+                    Industrial MX Verifier
                   </h3>
-                  <p className="text-xs text-gray-500 mt-1">Paste any text containing emails to extract them.</p>
+                  <p className="text-xs text-gray-500 mt-1">Paste your list below. We verify against live MX records, not just text patterns.</p>
                 </div>
                 <button onClick={() => setIsImportOpen(false)} className="p-2 hover:bg-white/5 rounded-full text-gray-500">
                   <X className="w-5 h-5" />
@@ -552,9 +573,11 @@ export default function VaultPage() {
 
                     <button 
                       onClick={handleAddVerifiedToFolder}
-                      className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:opacity-90 transition-all shadow-lg shadow-primary/20 flex justify-center items-center"
+                      disabled={verifiedEmails.size === 0}
+                      className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:opacity-90 transition-all shadow-lg shadow-primary/20 flex flex-col justify-center items-center group disabled:opacity-30 disabled:bg-gray-800"
                     >
-                      Save to {activeFolder?.name}
+                      <span className="text-sm">Save {verifiedEmails.size} Registered Leads</span>
+                      <span className="text-[10px] opacity-70 group-disabled:hidden">Verified by MX DNS</span>
                     </button>
                   </motion.div>
                 )}

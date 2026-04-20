@@ -22,13 +22,15 @@ export default function Home() {
     outlook: false,
     company: true,
   });
-
+  const [turbo, setTurbo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [emails, setEmails] = useState<string[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [searchQueryInfo, setSearchQueryInfo] = useState("");
   const [customEmail, setCustomEmail] = useState("");
+  const [verifyingCustom, setVerifyingCustom] = useState(false);
+  const [verifiedSet, setVerifiedSet] = useState<Set<string>>(new Set());
 
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
@@ -134,6 +136,7 @@ export default function Home() {
           emailProviders: activeProviders,
           allowCompanyDomain: allowCompanyDomain,
           page: currentPage,
+          turbo: turbo,
         }),
       });
 
@@ -159,6 +162,11 @@ export default function Home() {
         } else {
           setEmails(data.emails);
         }
+        // Since the backend already verified them, we add them to the verifiedSet
+        const newVerified = new Set(verifiedSet);
+        data.emails.forEach((e: string) => newVerified.add(e));
+        setVerifiedSet(newVerified);
+        
         setPage(currentPage);
         setSearchQueryInfo(data.query);
       } else {
@@ -190,21 +198,37 @@ export default function Home() {
     }
   };
 
-  const handleAddCustomEmail = () => {
+  const handleAddCustomEmail = async () => {
     if (!customEmail || !customEmail.includes("@")) return;
     const lowerEmail = customEmail.toLowerCase();
     
-    // Add to emails array if it doesn't exist
-    if (!emails.includes(lowerEmail)) {
-      setEmails([lowerEmail, ...emails]);
+    setVerifyingCustom(true);
+    try {
+      const res = await fetch("/api/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emails: [lowerEmail] })
+      });
+      const data = await res.json();
+      const isValid = data.success && data.results[0]?.isValid;
+
+      if (!emails.includes(lowerEmail)) {
+        setEmails(prev => [lowerEmail, ...prev]);
+      }
+      
+      if (isValid) {
+        setVerifiedSet(prev => new Set(prev).add(lowerEmail));
+        setSelectedEmails(prev => new Set(prev).add(lowerEmail));
+      } else {
+        alert(`${lowerEmail} domain could not be verified. It might be invalid.`);
+      }
+      
+      setCustomEmail(""); 
+    } catch (e) {
+      console.error("Manual verify failed", e);
+    } finally {
+      setVerifyingCustom(false);
     }
-    
-    // Auto-select the newly added email
-    const newSelection = new Set(selectedEmails);
-    newSelection.add(lowerEmail);
-    setSelectedEmails(newSelection);
-    
-    setCustomEmail(""); // Clear input
   };
 
 
@@ -252,40 +276,52 @@ export default function Home() {
               Search Parameters
             </h2>
 
-            <div className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Keywords / Job Title</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Software Engineer"
-                  value={keywords}
-                  onChange={(e) => setKeywords(e.target.value)}
-                  className="w-full bg-input/50 border border-surface-border rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                />
+            <div className="space-y-6">
+              <div className="relative group">
+                <div className="absolute inset-0 bg-primary/20 rounded-2xl blur-xl group-focus-within:bg-primary/40 transition-all"></div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search anything (e.g. Real Estate, Tech, Small Business...)"
+                    value={keywords}
+                    onChange={(e) => setKeywords(e.target.value)}
+                    className="w-full bg-[#0a0a0a]/80 backdrop-blur-xl border-2 border-white/10 rounded-2xl px-6 py-5 text-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-all shadow-2xl"
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
+                    {loading ? (
+                      <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                    ) : (
+                      <div className="bg-primary/10 text-primary px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-primary/20">
+                        100+ Leads target
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Location (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. San Francisco"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  className="w-full bg-input/50 border border-surface-border rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Source Network</label>
-                <select
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                  className="w-full bg-input/50 border border-surface-border rounded-xl px-4 py-3 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                >
-                  <option value="linkedin">LinkedIn</option>
-                  <option value="github">GitHub</option>
-                  <option value="web">General Web</option>
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-2">Area / Location</label>
+                  <input
+                    type="text"
+                    placeholder="Global"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-2">Preferred Network</label>
+                  <select
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white appearance-none focus:outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+                  >
+                    <option className="text-black" value="web">Multi-Search</option>
+                    <option className="text-black" value="linkedin">Professional</option>
+                    <option className="text-black" value="github">Developer Hub</option>
+                  </select>
+                </div>
               </div>
 
               <div>
@@ -312,6 +348,26 @@ export default function Home() {
                     </label>
                   ))}
                 </div>
+              </div>
+
+              <div className="pt-2">
+                <label className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-900/40 to-blue-900/40 border border-purple-500/30 rounded-2xl cursor-pointer hover:border-purple-500/50 transition-all group">
+                  <div className="flex items-center space-x-3">
+                    <div className={`p-2 rounded-lg ${turbo ? 'bg-purple-500 text-white animate-pulse' : 'bg-white/5 text-gray-500'}`}>
+                      <Settings className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-white font-bold text-sm block">Turbo Mode (Thousands)</span>
+                      <span className="text-[10px] text-gray-400">Deep search + Keyword multiplying</span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={turbo}
+                    onChange={() => setTurbo(!turbo)}
+                    className="w-5 h-5 rounded-full border-gray-600 text-purple-500 focus:ring-purple-500 bg-input"
+                  />
+                </label>
               </div>
 
               <button
@@ -410,10 +466,17 @@ export default function Home() {
                     >
                       <div className="flex flex-col">
                         <span className="text-sm text-gray-200 truncate">{email}</span>
-                        <span className="text-[10px] text-primary/70 font-medium flex items-center mt-1">
-                          <CheckCircle2 className="w-3 h-3 mr-1" />
-                          MX Verified
-                        </span>
+                        {verifiedSet.has(email) ? (
+                          <span className="text-[10px] text-primary/70 font-medium flex items-center mt-1">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            MX Verified
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-red-400/70 font-medium flex items-center mt-1">
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            Unverified Domain
+                          </span>
+                        )}
                       </div>
                       <div className={`w-5 h-5 rounded-full flex items-center justify-center border transition-colors ${
                         selectedEmails.has(email) ? "border-primary bg-primary" : "border-gray-500 group-hover:border-primary/50"

@@ -5,138 +5,169 @@ import { search as googleSearch, OrganicResult } from 'google-sr';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import dns from 'node:dns/promises';
+import net from 'node:net';
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0'
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 ];
 
 const getRandomUA = () => USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, defaultValue: T): Promise<T> {
+  let timeoutHandle: NodeJS.Timeout;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(defaultValue), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
+}
+
+function isEmailGenuine(email: string) {
+  const parts = email.split('@');
+  if (parts.length !== 2) return false;
+  const [username, domain] = parts;
+  const userLower = username.toLowerCase();
+  const domainLower = domain.toLowerCase();
+
+  if (username.length < 2 || !domain.includes('.')) return false;
+  
+  const hasRepetitive = (str: string) => {
+    if (/(.)\1{2,}/.test(str)) return true;
+    for (let i = 0; i <= str.length - 4; i++) {
+      const chunk = str.substring(i, i + 2);
+      if (str.substring(i + 2).includes(chunk)) return true;
+    }
+    return false;
+  };
+
+  const isBigProvider = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com'].includes(domainLower);
+  
+  if (isBigProvider) {
+    if (hasRepetitive(userLower)) return false;
+    const vowels = userLower.match(/[aeiouy]/gi);
+    const vRatio = vowels ? (vowels.length / userLower.length) : 0;
+    
+    if (userLower.length > 5 && (vRatio < 0.20 || vRatio > 0.65)) return false;
+    if (userLower.length <= 5 && (vRatio === 0 || vRatio === 1)) return false;
+    if (/[bcdfghjklmnpqrstvwxz]{4,}/i.test(userLower)) return false;
+  }
+
+  const garbageWords = ['noreply', 'no-reply', 'test', 'demo', 'fake', 'error', 'asdf', 'qwerty'];
+  if (garbageWords.some(w => userLower.includes(w))) return false;
+  if (/^\d{5,}$/.test(username)) return false;
+  if (/^[a-f0-9]{10,}$/i.test(username)) return false;
+
+  return true;
+}
+
+async function probeSmtp(email: string, mx: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(25, mx);
+    socket.setTimeout(2500);
+    let step = 0;
+    socket.on('data', (data) => {
+      const resp = data.toString();
+      if (step === 0 && resp.includes('220')) {
+        socket.write(`HELO lead-verify.com\r\n`);
+        step = 1;
+      } else if (step === 1 && resp.includes('250')) {
+        socket.write(`MAIL FROM:<check@lead-verify.com>\r\n`);
+        step = 2;
+      } else if (step === 2 && resp.includes('250')) {
+        socket.write(`RCPT TO:<${email}>\r\n`);
+        step = 3;
+      } else if (step === 3) {
+        socket.end();
+        resolve(resp.includes('250'));
+      }
+    });
+    socket.on('error', () => { socket.destroy(); resolve(true); });
+    socket.on('timeout', () => { socket.destroy(); resolve(true); });
+  });
+}
+
 async function verifyEmailDomain(email: string): Promise<boolean> {
+  if (!isEmailGenuine(email)) return false;
   const domain = email.split('@')[1];
-  if (!domain) return false;
   try {
-    const timeout = new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('DNS Timeout')), 3000));
-    const resolution = dns.resolveMx(domain).then(mx => mx && mx.length > 0);
-    return await Promise.race([resolution, timeout]);
+    const mxRecords = await dns.resolveMx(domain);
+    if (!mxRecords || mxRecords.length === 0) return false;
+    const priorityMx = mxRecords.sort((a, b) => a.priority - b.priority)[0].exchange;
+    return await withTimeout(probeSmtp(email, priorityMx), 4000, true);
   } catch (e) {
     try {
-      const a = await dns.resolve(domain);
+      const a = await dns.resolve(domain, 'A');
       return a && a.length > 0;
-    } catch (err) {
-      return false;
-    }
+    } catch { return false; }
   }
 }
 
-async function fetchGoogleSR(query: string) {
+async function fetchGoogleSR(query: string, page = 0) {
   try {
     const results = await googleSearch({ 
-       query,
+       query: `${query}${page > 0 ? ' page ' + (page + 1) : ''}`,
        parsers: [OrganicResult],
        noPartialResults: true
     });
-    return results.map(r => `${r.title} ${r.description}`).join(" ");
-  } catch (e) {
-    console.error("Google-SR Blocked or Failed:", e instanceof Error ? e.message : e);
-    return "";
-  }
+    return results.map(r => `${r.title} ${r.description} ${r.link}`).join(" ");
+  } catch (e) { return ""; }
 }
 
-async function fetchGoogleIt(query: string) {
+async function fetchGoogleIt(query: string, page = 0) {
   try {
-    const results = await googleIt({ query, limit: 30 });
-    return results.map((item: any) => `${item.title} ${item.snippet}`).join(" ");
-  } catch (e) {
-    return "";
-  }
+    const results = await googleIt({ query, limit: 50, start: page * 50 });
+    return results.map((item: any) => `${item.title} ${item.snippet} ${item.link}`).join(" ");
+  } catch (e) { return ""; }
 }
 
-async function fetchYahoo(query: string) {
+async function fetchYahoo(query: string, page = 0) {
   try {
-    const url = `https://search.yahoo.com/search?p=${encodeURIComponent(query)}&b=1`;
+    const start = page * 10 + 1;
+    const url = `https://search.yahoo.com/search?p=${encodeURIComponent(query)}&b=${start}`;
     const res = await axios.get(url, { headers: { 'User-Agent': getRandomUA() }, timeout: 5000 });
     const $ = cheerio.load(res.data);
     return $('body').text();
-  } catch (e) {
-    return "";
-  }
+  } catch (e) { return ""; }
 }
 
-async function fetchBing(query: string) {
+async function fetchBing(query: string, page = 0) {
   try {
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&first=1`;
+    const first = page * 10 + 1;
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&first=${first}`;
     const res = await axios.get(url, { headers: { 'User-Agent': getRandomUA() }, timeout: 5000 });
     const $ = cheerio.load(res.data);
     return $('body').text();
-  } catch (e) {
-    return "";
-  }
+  } catch (e) { return ""; }
 }
 
 async function fetchGithubCommits(keywords: string, providers: string[], page: number) {
   try {
     const q = encodeURIComponent(`${keywords}`);
     const res = await axios.get(`https://api.github.com/search/commits?q=${q}&per_page=100&page=${page}`, {
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'NodeJS/Email-Extractor-App'
-      },
+      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'NodeJS/Email-Extractor' },
       timeout: 8000
     });
-
     const emails = new Set<string>();
-    res.data.items.forEach((item: any) => {
-      if (item.commit && item.commit.author && item.commit.author.email) {
+    res.data.items?.forEach((item: any) => {
+      if (item.commit?.author?.email) {
         const email = item.commit.author.email.toLowerCase();
         const isAllowed = providers.some(p => email.includes(p.replace(/"/g, '')));
-        if (isAllowed && isEmailGenuine(email)) {
-          emails.add(email);
-        }
+        if (isAllowed && isEmailGenuine(email)) emails.add(email);
       }
     });
     return Array.from(emails);
-  } catch(e: any) {
-    return [];
-  }
+  } catch(e) { return []; }
 }
 
 async function fetchDDGSearch(query: string) {
   try {
     const response = await axios.post('https://html.duckduckgo.com/html/', `q=${encodeURIComponent(query)}`, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': getRandomUA()
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': getRandomUA() },
       timeout: 5000
     });
     const $ = cheerio.load(response.data);
     return $('body').text();
-  } catch (error) {
-    return "";
-  }
-}
-
-function isEmailGenuine(email: string) {
-  const parts = email.split('@');
-  if (parts.length !== 2) return false;
-  const username = parts[0];
-  if (username.length < 3) return false;
-  
-  // Don't filter out business basics like 'info' or 'contact' as they are prime leads
-  const garbageWords = [
-    'noreply', 'no-reply', 'test', 'demo', 'fake', 'error', 
-    'github', 'sentry', 'security', 'placeholder', 'example',
-    'notification', 'mailer-daemon', 'postmaster'
-  ];
-  if (garbageWords.some(w => username.includes(w))) return false;
-  
-  if (/^\d+$/.test(username)) return false;
-  if (/^[a-f0-9]{10,}$/.test(username)) return false;
-  return true;
+  } catch (error) { return ""; }
 }
 
 function extractEmailsFromText(text: string, providers: string[]) {
@@ -153,96 +184,78 @@ function extractEmailsFromText(text: string, providers: string[]) {
   return Array.from(emails);
 }
 
-async function fetchWebsiteContent(url: string) {
-  try {
-    const res = await axios.get(url, { 
-      headers: { 'User-Agent': getRandomUA() },
-      timeout: 5000 
-    });
-    return res.data;
-  } catch (e) {
-    return "";
-  }
-}
-
 export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
-  console.log("POST /api/extract - ULTIMATE ENGINE TRIGGERED");
+  console.log("POST /api/extract - DEEP VERIFY ENABLED");
   try {
-    const rawBody = await req.text();
-    if (!rawBody) return NextResponse.json({ success: false, error: 'Empty request' }, { status: 400 });
+    const body = await req.json();
+    const { keywords, location, emailProviders, allowCompanyDomain, page = 1, turbo = false } = body;
     
-    let body;
-    try { body = JSON.parse(rawBody); } catch (e) { return NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 }); }
-
-    const { keywords, location, source, emailProviders, allowCompanyDomain, page = 1 } = body;
     const isGenericSearch = allowCompanyDomain === true || (!emailProviders || emailProviders.length === 0);
     const providerQuery = isGenericSearch ? "" : emailProviders.map((p: string) => `"${p}"`).join(' OR ');
 
-    const fetches = [];
-    
-    // -- STAGE 1: SEARCH ENGINE DISCOVERY --
-    // We mix multiple queries to increase success chance if blocked
-    const searchTasks = [
-      `site:linkedin.com/in "${keywords}" ${location} ${providerQuery}`,
-      `site:facebook.com "${keywords}" ${location} "email" ${providerQuery}`,
-      `"${keywords}" ${location} "contact" ${providerQuery}`,
-      `"${keywords}" ${location} business directory`,
-    ];
-
-    // Parallel search across different engines and tasks
-    fetches.push(fetchGoogleSR(searchTasks[0]).catch(() => ""));
-    fetches.push(fetchGoogleSR(searchTasks[2]).catch(() => ""));
-    fetches.push(fetchGoogleIt(searchTasks[1]).catch(() => ""));
-    
-    fetches.push(fetchYahoo(searchTasks[0]).catch(() => ""));
-    fetches.push(fetchBing(searchTasks[2]).catch(() => ""));
-    fetches.push(fetchDDGSearch(searchTasks[3]).catch(() => ""));
-
-    // -- STAGE 2: GITHUB API --
-    fetches.push(fetchGithubCommits(`${keywords} ${location}`, isGenericSearch ? ["@"] : emailProviders, 1).then(a => a.join(" ")));
-
-    // -- STAGE 3: INDUSTRY EXPLORATION (Optional/Slow) --
-    if (page === 1) {
-      fetches.push(fetchWebsiteContent(`https://www.google.com/search?q=${encodeURIComponent(keywords + " " + location + " official website")}`).catch(() => ""));
+    let keywordList = [keywords || "business leads South Africa"];
+    if (turbo) {
+      keywordList = [keywords, `${keywords} services`, `${keywords} company`, `best ${keywords} South Africa`];
     }
 
-    const textResults = await Promise.all(fetches);
+    const textResults: string[] = [];
+    const pagesPerKeyword = turbo ? 2 : 1;
+
+    for (const kw of keywordList) {
+      const searchTasks = [
+        `site:linkedin.com/in "${kw}" ${location} ${providerQuery}`,
+        `site:yellowpages.co.za "${kw}"`,
+        `site:findsa.co.za "${kw}"`,
+        `"${kw}" ${location} "contact" ${providerQuery}`,
+        `"${kw}" ${location} "email" ${providerQuery}`
+      ];
+
+      for (let pIdx = 0; pIdx < pagesPerKeyword; pIdx++) {
+        const offset = (page - 1) * pagesPerKeyword + pIdx;
+        const fetchers = [
+          () => fetchGoogleSR(searchTasks[0], offset),
+          () => fetchGoogleIt(searchTasks[3], offset),
+          () => fetchYahoo(searchTasks[4], offset),
+          () => fetchBing(searchTasks[0], offset),
+          () => fetchDDGSearch(searchTasks[1]),
+          () => fetchDDGSearch(searchTasks[2])
+        ];
+
+        const results = await Promise.all(fetchers.map(f => withTimeout(f(), 10000, "")));
+        textResults.push(...results);
+      }
+      const gitEmails = await withTimeout(fetchGithubCommits(`${kw} ${location}`, isGenericSearch ? ["@"] : emailProviders, page), 8000, []);
+      textResults.push(gitEmails.join(" "));
+    }
+
     const combinedText = textResults.join(" ");
-
     const effectiveProviders = isGenericSearch ? ["@"] : emailProviders;
-    let extractedEmails = extractEmailsFromText(combinedText, effectiveProviders);
-    extractedEmails = Array.from(new Set(extractedEmails));
+    let candidates = Array.from(new Set(extractEmailsFromText(combinedText, effectiveProviders)));
 
-    console.log(`Engine found ${extractedEmails.length} candidates. Verifying...`);
-    
-    // Parallel verification with a global safety limit to prevent timeout
-    const verificationResults = await Promise.all(
-      extractedEmails.slice(0, 150).map(async (email) => {
-        const isValid = await verifyEmailDomain(email);
-        return isValid ? email : null;
-      })
-    );
+    console.log(`Deep Extraction found ${candidates.length} candidates. Starting SMTP-enabled verification...`);
 
-    const verifiedEmails = verificationResults.filter((e): e is string => e !== null);
-    console.log(`SUCCESS: Found ${verifiedEmails.length} verified leads.`);
+    const verifiedEmails: string[] = [];
+    const batchSize = 15;
+    const maxToVerify = turbo ? 300 : 150; 
+    const toProcess = candidates.slice(0, maxToVerify);
 
-    return NextResponse.json({ 
-        success: true, 
-        emails: verifiedEmails,
-        count: verifiedEmails.length,
-        query: `${keywords} ${location ? location : ''}`.trim()
-    });
+    for (let i = 0; i < toProcess.length; i += batchSize) {
+      const batch = toProcess.slice(i, i + batchSize);
+      const results = await Promise.all(batch.map(async (email) => {
+        try {
+          const isValid = await verifyEmailDomain(email);
+          return isValid ? email : null;
+        } catch { return null; }
+      }));
+      results.forEach(e => { if (e) verifiedEmails.push(e); });
+      if (!turbo && verifiedEmails.length >= 100) break;
+    }
 
-  } catch (error) {
-    console.error('Engine Crash:', error);
-    return NextResponse.json({ success: false, error: 'Engine error' }, { status: 500 });
+    return NextResponse.json({ success: true, emails: verifiedEmails, count: verifiedEmails.length, query: keywords });
+
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
-
-
-
-
-
-
