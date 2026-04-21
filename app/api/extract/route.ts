@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import puppeteer, { Browser, Page } from 'puppeteer';
+import type { Browser, Page } from 'puppeteer';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 
@@ -66,10 +66,25 @@ async function verifyEmail(email: string): Promise<boolean> {
 // ─── Puppeteer Helpers ────────────────────────────────────────────────────────
 
 async function makeBrowser(): Promise<Browser> {
-  return puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--window-size=1366,768'],
-  });
+  const isLocal = !process.env.VERCEL_ENV && !process.env.VERCEL && process.env.NODE_ENV !== 'production';
+
+  if (isLocal) {
+    const puppeteer = require('puppeteer');
+    return puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--window-size=1366,768'],
+    });
+  } else {
+    const puppeteerCore = require('puppeteer-core');
+    const chromium = require('@sparticuz/chromium');
+    
+    return puppeteerCore.launch({
+      args: [...chromium.args, '--disable-blink-features=AutomationControlled'],
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
+  }
 }
 
 async function openPage(browser: Browser): Promise<Page> {
