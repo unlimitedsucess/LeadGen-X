@@ -326,7 +326,7 @@ export default function MailerPage() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-2xl bg-[#0a0a0a] border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-black"
+              className="relative w-full max-w-2xl max-h-[90vh] bg-[#0a0a0a] border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-black flex flex-col"
             >
               <div className="p-6 border-b border-white/5 flex items-center justify-between">
                 <h3 className="text-xl font-bold flex items-center">
@@ -388,7 +388,7 @@ export default function MailerPage() {
                 </div>
               </div>
 
-              <div className="max-h-[400px] overflow-y-auto custom-scrollbar px-6 pb-6 space-y-2">
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 pb-6 space-y-2">
                 {filteredEmails.length === 0 ? (
                   <div className="py-12 text-center">
                     <Users className="w-12 h-12 text-gray-800 mx-auto mb-4" />

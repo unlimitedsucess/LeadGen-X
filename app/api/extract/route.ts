@@ -1,261 +1,319 @@
 import { NextResponse } from 'next/server';
-// @ts-expect-error google-it might not have types
-import googleIt from 'google-it';
-import { search as googleSearch, OrganicResult } from 'google-sr';
-import axios from 'axios';
-import * as cheerio from 'cheerio';
+import puppeteer, { Browser, Page } from 'puppeteer';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 
-const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-];
+// ─── Config ───────────────────────────────────────────────────────────────────
 
-const getRandomUA = () => USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, defaultValue: T): Promise<T> {
-  let timeoutHandle: NodeJS.Timeout;
-  const timeoutPromise = new Promise<T>((resolve) => {
-    timeoutHandle = setTimeout(() => resolve(defaultValue), timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
+async function withTimeout<T>(p: Promise<T>, ms: number, fb: T): Promise<T> {
+  let t: NodeJS.Timeout;
+  const tp = new Promise<T>(res => { t = setTimeout(() => res(fb), ms); });
+  return Promise.race([p, tp]).finally(() => clearTimeout(t));
 }
 
-function isEmailGenuine(email: string) {
-  const parts = email.split('@');
-  if (parts.length !== 2) return false;
-  const [username, domain] = parts;
-  const userLower = username.toLowerCase();
-  const domainLower = domain.toLowerCase();
+// ─── Email Validation ─────────────────────────────────────────────────────────
 
-  if (username.length < 2 || !domain.includes('.')) return false;
-  
-  const hasRepetitive = (str: string) => {
-    if (/(.)\1{2,}/.test(str)) return true;
-    for (let i = 0; i <= str.length - 4; i++) {
-      const chunk = str.substring(i, i + 2);
-      if (str.substring(i + 2).includes(chunk)) return true;
-    }
-    return false;
-  };
+const JUNK = ['noreply','no-reply','mailer','bounce','test','demo','example','sample','placeholder','sentry','webpack','localhost'];
 
-  const isBigProvider = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com'].includes(domainLower);
-  
-  if (isBigProvider) {
-    if (hasRepetitive(userLower)) return false;
-    const vowels = userLower.match(/[aeiouy]/gi);
-    const vRatio = vowels ? (vowels.length / userLower.length) : 0;
-    
-    if (userLower.length > 5 && (vRatio < 0.20 || vRatio > 0.65)) return false;
-    if (userLower.length <= 5 && (vRatio === 0 || vRatio === 1)) return false;
-    if (/[bcdfghjklmnpqrstvwxz]{4,}/i.test(userLower)) return false;
-  }
-
-  const garbageWords = ['noreply', 'no-reply', 'test', 'demo', 'fake', 'error', 'asdf', 'qwerty'];
-  if (garbageWords.some(w => userLower.includes(w))) return false;
-  if (/^\d{5,}$/.test(username)) return false;
-  if (/^[a-f0-9]{10,}$/i.test(username)) return false;
-
-  return true;
+function isGenuine(email: string): boolean {
+  if (!email || email.length < 7) return false;
+  const [u, d] = email.split('@');
+  if (!u || !d || !d.includes('.')) return false;
+  if (JUNK.some(j => email.includes(j))) return false;
+  if (/^\d{5,}$/.test(u)) return false;
+  if (/^[a-f0-9]{12,}$/i.test(u)) return false;
+  if (/\.(png|jpg|gif|svg|webp|js|css|woff)$/i.test(email)) return false;
+  const tld = d.split('.').pop() || '';
+  return tld.length >= 2 && tld.length <= 10;
 }
+
+// ─── SMTP Verification ────────────────────────────────────────────────────────
 
 async function probeSmtp(email: string, mx: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.createConnection(25, mx);
-    socket.setTimeout(2500);
+  return new Promise(resolve => {
+    const s = net.createConnection(25, mx);
+    s.setTimeout(3000);
     let step = 0;
-    socket.on('data', (data) => {
-      const resp = data.toString();
-      if (step === 0 && resp.includes('220')) {
-        socket.write(`HELO lead-verify.com\r\n`);
-        step = 1;
-      } else if (step === 1 && resp.includes('250')) {
-        socket.write(`MAIL FROM:<check@lead-verify.com>\r\n`);
-        step = 2;
-      } else if (step === 2 && resp.includes('250')) {
-        socket.write(`RCPT TO:<${email}>\r\n`);
-        step = 3;
-      } else if (step === 3) {
-        socket.end();
-        resolve(resp.includes('250'));
-      }
+    s.on('data', d => {
+      const r = d.toString();
+      if (step === 0 && r.startsWith('220')) { s.write('HELO verify.com\r\n'); step = 1; }
+      else if (step === 1 && r.includes('250')) { s.write('MAIL FROM:<v@verify.com>\r\n'); step = 2; }
+      else if (step === 2 && r.includes('250')) { s.write(`RCPT TO:<${email}>\r\n`); step = 3; }
+      else if (step === 3) { s.end(); resolve(r.includes('250')); }
     });
-    socket.on('error', () => { socket.destroy(); resolve(true); });
-    socket.on('timeout', () => { socket.destroy(); resolve(true); });
+    s.on('error', () => { s.destroy(); resolve(true); });
+    s.on('timeout', () => { s.destroy(); resolve(true); });
   });
 }
 
-async function verifyEmailDomain(email: string): Promise<boolean> {
-  if (!isEmailGenuine(email)) return false;
+async function verifyEmail(email: string): Promise<boolean> {
+  if (!isGenuine(email)) return false;
   const domain = email.split('@')[1];
   try {
-    const mxRecords = await dns.resolveMx(domain);
-    if (!mxRecords || mxRecords.length === 0) return false;
-    const priorityMx = mxRecords.sort((a, b) => a.priority - b.priority)[0].exchange;
-    return await withTimeout(probeSmtp(email, priorityMx), 4000, true);
-  } catch (e) {
-    try {
-      const a = await dns.resolve(domain, 'A');
-      return a && a.length > 0;
-    } catch { return false; }
+    const mx = await dns.resolveMx(domain);
+    if (!mx?.length) return false;
+    const best = mx.sort((a, b) => a.priority - b.priority)[0].exchange;
+    return await withTimeout(probeSmtp(email, best), 4000, true);
+  } catch {
+    try { return (await dns.resolve(domain, 'A')).length > 0; }
+    catch { return false; }
   }
 }
 
-async function fetchGoogleSR(query: string, page = 0) {
-  try {
-    const results = await googleSearch({ 
-       query: `${query}${page > 0 ? ' page ' + (page + 1) : ''}`,
-       parsers: [OrganicResult],
-       noPartialResults: true
-    });
-    return results.map(r => `${r.title} ${r.description} ${r.link}`).join(" ");
-  } catch (e) { return ""; }
-}
+// ─── Puppeteer Helpers ────────────────────────────────────────────────────────
 
-async function fetchGoogleIt(query: string, page = 0) {
-  try {
-    const results = await googleIt({ query, limit: 50, start: page * 50 });
-    return results.map((item: any) => `${item.title} ${item.snippet} ${item.link}`).join(" ");
-  } catch (e) { return ""; }
-}
-
-async function fetchYahoo(query: string, page = 0) {
-  try {
-    const start = page * 10 + 1;
-    const url = `https://search.yahoo.com/search?p=${encodeURIComponent(query)}&b=${start}`;
-    const res = await axios.get(url, { headers: { 'User-Agent': getRandomUA() }, timeout: 5000 });
-    const $ = cheerio.load(res.data);
-    return $('body').text();
-  } catch (e) { return ""; }
-}
-
-async function fetchBing(query: string, page = 0) {
-  try {
-    const first = page * 10 + 1;
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&first=${first}`;
-    const res = await axios.get(url, { headers: { 'User-Agent': getRandomUA() }, timeout: 5000 });
-    const $ = cheerio.load(res.data);
-    return $('body').text();
-  } catch (e) { return ""; }
-}
-
-async function fetchGithubCommits(keywords: string, providers: string[], page: number) {
-  try {
-    const q = encodeURIComponent(`${keywords}`);
-    const res = await axios.get(`https://api.github.com/search/commits?q=${q}&per_page=100&page=${page}`, {
-      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'NodeJS/Email-Extractor' },
-      timeout: 8000
-    });
-    const emails = new Set<string>();
-    res.data.items?.forEach((item: any) => {
-      if (item.commit?.author?.email) {
-        const email = item.commit.author.email.toLowerCase();
-        const isAllowed = providers.some(p => email.includes(p.replace(/"/g, '')));
-        if (isAllowed && isEmailGenuine(email)) emails.add(email);
-      }
-    });
-    return Array.from(emails);
-  } catch(e) { return []; }
-}
-
-async function fetchDDGSearch(query: string) {
-  try {
-    const response = await axios.post('https://html.duckduckgo.com/html/', `q=${encodeURIComponent(query)}`, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': getRandomUA() },
-      timeout: 5000
-    });
-    const $ = cheerio.load(response.data);
-    return $('body').text();
-  } catch (error) { return ""; }
-}
-
-function extractEmailsFromText(text: string, providers: string[]) {
-  const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
-  const emails = new Set<string>();
-  const matches = text.match(emailRegex) || [];
-  matches.forEach(m => {
-    const lower = m.toLowerCase();
-    const isAllowedProvider = providers.some(p => lower.includes(p.replace(/"/g, '')));
-    if (!isAllowedProvider) return;
-    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.gif') || lower.endsWith('.svg')) return;
-    if (isEmailGenuine(lower)) emails.add(lower);
+async function makeBrowser(): Promise<Browser> {
+  return puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--window-size=1366,768'],
   });
-  return Array.from(emails);
 }
+
+async function openPage(browser: Browser): Promise<Page> {
+  const page = await browser.newPage();
+  await page.setUserAgent(UA);
+  await page.setViewport({ width: 1366, height: 768 });
+  await page.setRequestInterception(true);
+  page.on('request', req => {
+    if (['image','font','media'].includes(req.resourceType())) req.abort();
+    else req.continue();
+  });
+  return page;
+}
+
+// Extract all emails from a rendered page
+async function extractFromPage(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const emails = new Set<string>();
+    const rx = /([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,10})/gi;
+
+    (document.body?.innerText?.match(rx) || []).forEach((e: string) => emails.add(e.toLowerCase()));
+
+    document.querySelectorAll('a[href^="mailto:"]').forEach((el: Element) => {
+      const href = (el as HTMLAnchorElement).getAttribute('href')!.replace('mailto:','').split('?')[0].trim();
+      if (href.includes('@')) emails.add(href.toLowerCase());
+    });
+
+    (document.querySelectorAll('[data-email],[data-mail]') as NodeListOf<HTMLElement>).forEach(el => {
+      const e = el.dataset.email || el.dataset.mail || '';
+      if (e.includes('@')) emails.add(e.toLowerCase());
+    });
+
+    const html = document.documentElement.innerHTML
+      .replace(/&#64;/g,'@').replace(/&#46;/g,'.').replace(/\[at\]/gi,'@').replace(/\[dot\]/gi,'.');
+    (html.match(rx) || []).forEach((e: string) => emails.add(e.toLowerCase()));
+
+    return [...emails];
+  });
+}
+
+async function visitExtract(browser: Browser, url: string, wait = 2000): Promise<string[]> {
+  const page = await openPage(browser);
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await sleep(wait);
+    return await extractFromPage(page);
+  } catch { return []; }
+  finally { await page.close(); }
+}
+
+// ─── Directory Scrapers ───────────────────────────────────────────────────────
+
+async function scrapeProperty24(browser: Browser, keywords: string, candidates: Set<string>) {
+  const urls = [
+    'https://www.property24.com/real-estate-agents/south-africa',
+    'https://www.property24.com/real-estate-agents/johannesburg/c2',
+    'https://www.property24.com/real-estate-agents/cape-town/c8',
+    'https://www.property24.com/real-estate-agents/durban/c5',
+    'https://www.property24.com/real-estate-agents/pretoria/c3',
+  ];
+  const page = await openPage(browser);
+  for (const url of urls) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await sleep(2000);
+      const links: string[] = await page.evaluate(() =>
+        [...document.querySelectorAll('a[href*="/agent/"]')].map((a: any) => a.href).slice(0,20)
+      );
+      for (const link of [...new Set(links)]) {
+        const emails = await visitExtract(browser, link, 1500);
+        emails.filter(isGenuine).forEach(e => candidates.add(e));
+        await sleep(400);
+      }
+      (await extractFromPage(page)).filter(isGenuine).forEach(e => candidates.add(e));
+    } catch { /* continue */ }
+    await sleep(800);
+  }
+  await page.close();
+}
+
+async function scrapePrivateProperty(browser: Browser, candidates: Set<string>) {
+  const urls = [
+    'https://www.privateproperty.co.za/estate-agents',
+    'https://www.privateproperty.co.za/estate-agents?area=JHB',
+    'https://www.privateproperty.co.za/estate-agents?area=CPT',
+  ];
+  for (const url of urls) {
+    const emails = await visitExtract(browser, url, 2500);
+    emails.filter(isGenuine).forEach(e => candidates.add(e));
+    await sleep(700);
+  }
+}
+
+async function scrapeBizcommunity(browser: Browser, candidates: Set<string>) {
+  const listingPages = [
+    'https://www.bizcommunity.com/Companies/196/91.html',
+    'https://www.bizcommunity.com/Companies/196/11.html',
+    'https://www.bizcommunity.com/Companies/196/181.html',
+    'https://www.bizcommunity.com/Companies/196/201.html',
+  ];
+  const page = await openPage(browser);
+  for (const url of listingPages) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await sleep(1500);
+      const companyLinks: string[] = await page.evaluate(() =>
+        [...document.querySelectorAll('a[href*="/Company/"]')].map((a: any) => a.href).slice(0,15)
+      );
+      for (const link of [...new Set(companyLinks)]) {
+        const emails = await visitExtract(browser, link, 1500);
+        emails.filter(isGenuine).forEach(e => candidates.add(e));
+        await sleep(500);
+      }
+      (await extractFromPage(page)).filter(isGenuine).forEach(e => candidates.add(e));
+    } catch { /* continue */ }
+    await sleep(1000);
+  }
+  await page.close();
+}
+
+async function scrapeYellowPages(browser: Browser, keywords: string, candidates: Set<string>, target: number) {
+  const page = await openPage(browser);
+  for (let p = 1; p <= 5 && candidates.size < target; p++) {
+    try {
+      await page.goto(`https://www.yellowpages.co.za/search/?q=${encodeURIComponent(keywords)}&p=${p}`, { waitUntil: 'networkidle2', timeout: 25000 });
+      await sleep(1500);
+      const links: string[] = await page.evaluate(() =>
+        [...document.querySelectorAll('.listing-name a,h2 a,h3 a')].map((a: any) => a.href).filter((h: string) => h?.startsWith('http')).slice(0,10)
+      );
+      (await extractFromPage(page)).filter(isGenuine).forEach(e => candidates.add(e));
+      for (const link of [...new Set(links)]) {
+        if (candidates.size >= target) break;
+        (await visitExtract(browser, link, 1500)).filter(isGenuine).forEach(e => candidates.add(e));
+        await sleep(400);
+      }
+    } catch { /* continue */ }
+    await sleep(800);
+  }
+  await page.close();
+}
+
+async function scrapeCompanyDirs(browser: Browser, keywords: string, candidates: Set<string>) {
+  const urls = [
+    `https://www.cylex.co.za/search.html?what=${encodeURIComponent(keywords)}`,
+    `https://www.hotfrog.co.za/search/south-africa/${encodeURIComponent(keywords.replace(/\s+/g,'%20'))}`,
+    `https://za.kompass.com/a/real-estate-companies/99011/south-africa/za/`,
+    `https://www.brabys.com/search/?q=${encodeURIComponent(keywords + ' South Africa')}`,
+  ];
+  for (const url of urls) {
+    const emails = await visitExtract(browser, url, 2000);
+    emails.filter(isGenuine).forEach(e => candidates.add(e));
+    await sleep(600);
+  }
+}
+
+async function provinceSweep(browser: Browser, keywords: string, candidates: Set<string>, target: number) {
+  const cities = ['Johannesburg','Cape Town','Durban','Pretoria','Port Elizabeth','Bloemfontein'];
+  const page = await openPage(browser);
+  for (const city of cities) {
+    if (candidates.size >= target) break;
+    try {
+      await page.goto(`https://www.yellowpages.co.za/search/?q=${encodeURIComponent(keywords+' '+city)}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await sleep(1200);
+      (await extractFromPage(page)).filter(isGenuine).forEach(e => candidates.add(e));
+    } catch { /* continue */ }
+    await sleep(600);
+  }
+  await page.close();
+}
+
+// ─── Main API Handler ─────────────────────────────────────────────────────────
 
 export const runtime = 'nodejs';
+export const maxDuration = 300; // 5 minute timeout for Vercel/Next
 
 export async function POST(req: Request) {
-  console.log("POST /api/extract - DEEP VERIFY ENABLED");
+  console.log('\n========= LEADGEN X — PUPPETEER HARVESTER =========');
+  let browser: Browser | null = null;
   try {
-    const body = await req.json();
-    const { keywords, location, emailProviders, allowCompanyDomain, page = 1, turbo = false } = body;
-    
-    const isGenericSearch = allowCompanyDomain === true || (!emailProviders || emailProviders.length === 0);
-    const providerQuery = isGenericSearch ? "" : emailProviders.map((p: string) => `"${p}"`).join(' OR ');
+    const { keywords, location, emailProviders, allowCompanyDomain, turbo = false } = await req.json();
+    const target = turbo ? 200 : 100;
+    const candidates = new Set<string>();
 
-    let keywordList = [keywords || "business leads South Africa"];
-    if (turbo) {
-      keywordList = [keywords, `${keywords} services`, `${keywords} company`, `best ${keywords} South Africa`];
+    console.log(`Target: ${target} | Query: "${keywords}" in "${location}"`);
+
+    browser = await makeBrowser();
+
+    // Phase 0: Real estate agent directories
+    console.log('[Phase 0] Property24 & PrivateProperty...');
+    await withTimeout(scrapeProperty24(browser, keywords, candidates), 60000, undefined);
+    await withTimeout(scrapePrivateProperty(browser, candidates), 30000, undefined);
+    console.log(`  → ${candidates.size} candidates`);
+
+    // Phase 1: Bizcommunity
+    if (candidates.size < target) {
+      console.log('[Phase 1] Bizcommunity...');
+      await withTimeout(scrapeBizcommunity(browser, candidates), 90000, undefined);
+      console.log(`  → ${candidates.size} candidates`);
     }
 
-    const textResults: string[] = [];
-    const pagesPerKeyword = turbo ? 2 : 1;
-
-    for (const kw of keywordList) {
-      const searchTasks = [
-        `site:linkedin.com/in "${kw}" ${location} ${providerQuery}`,
-        `site:yellowpages.co.za "${kw}"`,
-        `site:findsa.co.za "${kw}"`,
-        `"${kw}" ${location} "contact" ${providerQuery}`,
-        `"${kw}" ${location} "email" ${providerQuery}`
-      ];
-
-      for (let pIdx = 0; pIdx < pagesPerKeyword; pIdx++) {
-        const offset = (page - 1) * pagesPerKeyword + pIdx;
-        const fetchers = [
-          () => fetchGoogleSR(searchTasks[0], offset),
-          () => fetchGoogleIt(searchTasks[3], offset),
-          () => fetchYahoo(searchTasks[4], offset),
-          () => fetchBing(searchTasks[0], offset),
-          () => fetchDDGSearch(searchTasks[1]),
-          () => fetchDDGSearch(searchTasks[2])
-        ];
-
-        const results = await Promise.all(fetchers.map(f => withTimeout(f(), 10000, "")));
-        textResults.push(...results);
-      }
-      const gitEmails = await withTimeout(fetchGithubCommits(`${kw} ${location}`, isGenericSearch ? ["@"] : emailProviders, page), 8000, []);
-      textResults.push(gitEmails.join(" "));
+    // Phase 2: YellowPages
+    if (candidates.size < target) {
+      console.log('[Phase 2] YellowPages ZA...');
+      await withTimeout(scrapeYellowPages(browser, keywords, candidates, target), 60000, undefined);
+      console.log(`  → ${candidates.size} candidates`);
     }
 
-    const combinedText = textResults.join(" ");
-    const effectiveProviders = isGenericSearch ? ["@"] : emailProviders;
-    let candidates = Array.from(new Set(extractEmailsFromText(combinedText, effectiveProviders)));
-
-    console.log(`Deep Extraction found ${candidates.length} candidates. Starting SMTP-enabled verification...`);
-
-    const verifiedEmails: string[] = [];
-    const batchSize = 15;
-    const maxToVerify = turbo ? 300 : 150; 
-    const toProcess = candidates.slice(0, maxToVerify);
-
-    for (let i = 0; i < toProcess.length; i += batchSize) {
-      const batch = toProcess.slice(i, i + batchSize);
-      const results = await Promise.all(batch.map(async (email) => {
-        try {
-          const isValid = await verifyEmailDomain(email);
-          return isValid ? email : null;
-        } catch { return null; }
-      }));
-      results.forEach(e => { if (e) verifiedEmails.push(e); });
-      if (!turbo && verifiedEmails.length >= 100) break;
+    // Phase 3: General company dirs
+    if (candidates.size < target) {
+      console.log('[Phase 3] Cylex / Hotfrog / Kompass / Brabys...');
+      await withTimeout(scrapeCompanyDirs(browser, keywords, candidates), 40000, undefined);
+      console.log(`  → ${candidates.size} candidates`);
     }
 
-    return NextResponse.json({ success: true, emails: verifiedEmails, count: verifiedEmails.length, query: keywords });
+    // Phase 4: Province sweep
+    if (candidates.size < target) {
+      console.log('[Phase 4] Province sweep...');
+      await withTimeout(provinceSweep(browser, keywords, candidates, target), 60000, undefined);
+      console.log(`  → ${candidates.size} candidates`);
+    }
 
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    await browser.close();
+    browser = null;
+
+    // Verify
+    console.log(`[Verification] Checking ${candidates.size} candidates...`);
+    const allEmails = Array.from(candidates);
+    const verified: string[] = [];
+    const batch = 15;
+    for (let i = 0; i < allEmails.length && verified.length < target; i += batch) {
+      const results = await Promise.all(
+        allEmails.slice(i, i + batch).map(async e => {
+          try { return (await verifyEmail(e)) ? e : null; } catch { return null; }
+        })
+      );
+      results.forEach(e => { if (e) verified.push(e); });
+    }
+
+    console.log(`✅ Done — ${verified.length} verified leads`);
+    return NextResponse.json({ success: true, emails: verified, count: verified.length });
+
+  } catch (err: any) {
+    if (browser) { try { await browser.close(); } catch {} }
+    console.error('LeadGen X Error:', err.message);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

@@ -20,6 +20,7 @@ export default function Home() {
     yahoo: false,
     hotmail: false,
     outlook: false,
+    co_za: false,
     company: true,
   });
   const [turbo, setTurbo] = useState(false);
@@ -120,7 +121,10 @@ export default function Home() {
 
     const activeProviders = Object.entries(providers)
       .filter(([key, active]) => active && key !== 'company')
-      .map(([key]) => `@${key}.com`);
+      .map(([key]) => {
+        if (key === 'co_za') return '.co.za';
+        return `@${key}.com`;
+      });
     
     // If company is selected, we allow '@' (which matches all domains)
     const allowCompanyDomain = providers.company;
@@ -290,11 +294,7 @@ export default function Home() {
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
                     {loading ? (
                       <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                    ) : (
-                      <div className="bg-primary/10 text-primary px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-primary/20">
-                        100+ Leads target
-                      </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -318,7 +318,9 @@ export default function Home() {
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white appearance-none focus:outline-none focus:ring-1 focus:ring-primary/40 transition-all"
                   >
                     <option className="text-black" value="web">Multi-Search</option>
-                    <option className="text-black" value="linkedin">Professional</option>
+                    <option className="text-black" value="linkedin">LinkedIn</option>
+                    <option className="text-black" value="github">GitHub</option>
+                    <option className="text-black" value="linkedin">Professionals</option>
                     <option className="text-black" value="github">Developer Hub</option>
                   </select>
                 </div>
@@ -344,7 +346,9 @@ export default function Home() {
                         onChange={() => setProviders({ ...providers, [key]: !value })}
                         className="w-4 h-4 rounded border-gray-600 text-primary focus:ring-primary bg-input"
                       />
-                      <span className="text-gray-300 text-sm capitalize">@{key}.com</span>
+                      <span className="text-gray-300 text-sm">
+                        {key === 'co_za' ? '.co.za' : `@${key}.com`}
+                      </span>
                     </label>
                   ))}
                 </div>
