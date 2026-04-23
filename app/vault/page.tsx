@@ -20,7 +20,8 @@ import {
   FolderPlus,
   ArrowLeft,
   Check,
-  AlertCircle
+  AlertCircle,
+  GripVertical
 } from "lucide-react";
 import Link from 'next/link';
 
@@ -41,6 +42,10 @@ export default function VaultPage() {
   const [extractedFromPaste, setExtractedFromPaste] = useState<string[]>([]);
   const [verifying, setVerifying] = useState(false);
   const [verifiedEmails, setVerifiedEmails] = useState<Set<string>>(new Set());
+
+  // Drag selection state
+  const [isDraggingSelection, setIsDraggingSelection] = useState(false);
+  const [dragSelectionMode, setDragSelectionMode] = useState<'select' | 'deselect' | null>(null);
 
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -67,6 +72,14 @@ export default function VaultPage() {
       setFolders(initialFolders);
       localStorage.setItem("email_folders", JSON.stringify(initialFolders));
     }
+
+    // Global mouse up for drag selection
+    const handleGlobalMouseUp = () => {
+      setIsDraggingSelection(false);
+      setDragSelectionMode(null);
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
   }, []);
 
   const saveFolders = (updatedFolders: EmailFolder[]) => {
@@ -180,9 +193,54 @@ export default function VaultPage() {
     setSelectedEmails(newSet);
   };
 
+  const handleStartDragSelection = (email: string, isCurrentlySelected: boolean) => {
+    setIsDraggingSelection(true);
+    const newMode = isCurrentlySelected ? 'deselect' : 'select';
+    setDragSelectionMode(newMode);
+    
+    const newSet = new Set(selectedEmails);
+    if (newMode === 'select') newSet.add(email);
+    else newSet.delete(email);
+    setSelectedEmails(newSet);
+  };
+
+  const handleMouseEnterEmail = (email: string, e: React.MouseEvent) => {
+    if (!isDraggingSelection || !dragSelectionMode) return;
+    
+    const newSet = new Set(selectedEmails);
+    if (dragSelectionMode === 'select') newSet.add(email);
+    else newSet.delete(email);
+    setSelectedEmails(newSet);
+
+    // Auto-scroll logic
+    const container = e.currentTarget.closest('.overflow-y-auto');
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      const threshold = 50;
+      if (e.clientY < rect.top + threshold) {
+        container.scrollTop -= 20;
+      } else if (e.clientY > rect.bottom - threshold) {
+        container.scrollTop += 20;
+      }
+    }
+  };
+
   const selectAll = () => {
     if (selectedEmails.size === filteredEmails.length) setSelectedEmails(new Set());
     else setSelectedEmails(new Set(filteredEmails));
+  };
+
+  const selectCount = (count: number) => {
+    const newSet = new Set(selectedEmails);
+    let added = 0;
+    for (const email of filteredEmails) {
+      if (!newSet.has(email)) {
+        newSet.add(email);
+        added++;
+      }
+      if (added >= count) break;
+    }
+    setSelectedEmails(newSet);
   };
 
   const handleDeleteEmails = () => {
@@ -282,24 +340,13 @@ export default function VaultPage() {
         {/* Sidebar: Folders */}
         <div className="lg:col-span-3 space-y-6">
           <div className="glass-panel p-4 rounded-2xl">
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 px-2">Folders</h2>
-            <div className="space-y-1">
+            <h2 className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 px-2">Folders</h2>
+            <div className="flex lg:flex-col gap-2 lg:gap-1 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0 custom-scrollbar">
               {folders.map(folder => (
                 <div
                   key={folder.id}
                   onClick={() => setActiveFolderId(folder.id)}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.classList.add('bg-primary/20');
-                  }}
-                  onDragLeave={(e) => {
-                    e.currentTarget.classList.remove('bg-primary/20');
-                  }}
-                  onDrop={(e) => {
-                    e.currentTarget.classList.remove('bg-primary/20');
-                    handlePasteEmails(folder.id);
-                  }}
-                  className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all ${
+                  className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all whitespace-nowrap lg:whitespace-normal min-w-[140px] lg:min-w-0 ${
                     activeFolderId === folder.id 
                     ? "bg-primary/20 text-white border border-primary/30" 
                     : "text-gray-400 hover:bg-white/5 border border-transparent"
@@ -314,7 +361,7 @@ export default function VaultPage() {
                     {folder.id !== 'uncategorized' && (
                       <button 
                         onClick={(e) => handleDeleteFolder(folder.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-all"
+                        className="hidden lg:block opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-all"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -386,31 +433,33 @@ export default function VaultPage() {
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="flex items-center justify-between p-3 bg-primary/10 border border-primary/20 rounded-xl mb-4 overflow-hidden"
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-primary/10 border border-primary/20 rounded-xl mb-4 overflow-hidden gap-3"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
                     <span className="text-sm font-medium text-primary ml-2">{selectedEmails.size} selected</span>
-                    <div className="h-4 w-[1px] bg-primary/20" />
-                    <button 
-                      onClick={() => handleClipboardAction('copy')}
-                      className="flex items-center text-xs font-bold text-gray-300 hover:text-white"
-                    >
-                      <Copy className="w-3 h-3 mr-1" /> Copy
-                    </button>
-                    <button 
-                       onClick={() => handleClipboardAction('cut')}
-                      className="flex items-center text-xs font-bold text-gray-300 hover:text-white"
-                    >
-                      <Scissors className="w-3 h-3 mr-1" /> Cut
-                    </button>
-                    <button 
-                      onClick={handleDeleteEmails}
-                      className="flex items-center text-xs font-bold text-red-400 hover:text-red-300"
-                    >
-                      <Trash2 className="w-3 h-3 mr-1" /> Delete
-                    </button>
+                    <div className="h-4 w-[1px] bg-primary/20 hidden sm:block" />
+                    <div className="flex items-center gap-4 flex-1 sm:flex-none justify-around sm:justify-start">
+                      <button 
+                        onClick={() => handleClipboardAction('copy')}
+                        className="flex items-center text-xs font-bold text-gray-300 hover:text-white"
+                      >
+                        <Copy className="w-3 h-3 mr-1" /> Copy
+                      </button>
+                      <button 
+                        onClick={() => handleClipboardAction('cut')}
+                        className="flex items-center text-xs font-bold text-gray-300 hover:text-white"
+                      >
+                        <Scissors className="w-3 h-3 mr-1" /> Cut
+                      </button>
+                      <button 
+                        onClick={handleDeleteEmails}
+                        className="flex items-center text-xs font-bold text-red-400 hover:text-red-300"
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" /> Delete
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => setSelectedEmails(new Set())} className="text-gray-500 hover:text-white p-1">
+                  <button onClick={() => setSelectedEmails(new Set())} className="text-gray-500 hover:text-white p-1 self-end sm:self-auto">
                     <X className="w-4 h-4" />
                   </button>
                 </motion.div>
@@ -418,7 +467,7 @@ export default function VaultPage() {
             </AnimatePresence>
 
             {/* Emails List */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2 select-none">
               {filteredEmails.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-500 py-20">
                   <Mail className="w-12 h-12 mb-4 opacity-10" />
@@ -434,44 +483,85 @@ export default function VaultPage() {
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center p-3 mb-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 mb-2 gap-4">
                     <button onClick={selectAll} className="flex items-center text-xs font-bold text-gray-500 hover:text-gray-300">
-                      <div className={`w-4 h-4 rounded border mr-3 flex items-center justify-center ${selectedEmails.size === filteredEmails.length ? "bg-primary border-primary" : "border-gray-600"}`}>
-                        {selectedEmails.size === filteredEmails.length && <Check className="w-3 h-3 text-white" />}
+                      <div className={`w-4 h-4 rounded border mr-3 flex items-center justify-center ${selectedEmails.size === filteredEmails.length && filteredEmails.length > 0 ? "bg-primary border-primary" : "border-gray-600"}`}>
+                        {selectedEmails.size === filteredEmails.length && filteredEmails.length > 0 && <Check className="w-3 h-3 text-white" />}
                       </div>
                       Select All
                     </button>
+
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest mr-2">Select First:</span>
+                        {[10, 20, 30, 50].map(count => (
+                          <button
+                            key={count}
+                            onClick={() => selectCount(count)}
+                            className="px-3 py-1 bg-white/5 hover:bg-primary/20 border border-white/10 rounded-md text-[10px] font-bold text-gray-400 hover:text-primary transition-all"
+                          >
+                            {count}
+                          </button>
+                        ))}
+                      </div>
+                      
+                      {selectedEmails.size > 0 && (
+                        <motion.div 
+                          initial={{ scale: 0.8, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          className="px-3 py-1 bg-primary text-white text-[10px] font-black rounded-full shadow-[0_0_15px_rgba(59,130,246,0.5)] flex items-center"
+                        >
+                          {selectedEmails.size} LEADS READY
+                        </motion.div>
+                      )}
+                    </div>
                   </div>
                   {filteredEmails.map((email, idx) => (
                     <div
                       key={email + idx}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/plain', email);
-                        // Start cut operation for this single email
-                         setClipboard({
-                          type: 'cut',
-                          emails: [email],
-                          fromFolderId: activeFolderId
-                        });
-                      }}
-                      onClick={() => toggleEmailSelection(email)}
-                      className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                      onMouseEnter={(e) => handleMouseEnterEmail(email, e)}
+                      className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all select-none group ${
                         selectedEmails.has(email) 
                         ? "bg-primary/10 border-primary/50 shadow-[0_4px_12px_rgba(59,130,246,0.05)]" 
                         : "bg-white/[0.02] border-white/5 hover:bg-white/5"
                       }`}
                     >
-                      <div className="flex items-center min-w-0">
-                        <div className={`w-4 h-4 rounded border mr-4 shrink-0 flex items-center justify-center transition-colors ${selectedEmails.has(email) ? "bg-primary border-primary" : "border-gray-700"}`}>
-                          {selectedEmails.has(email) && <Check className="w-3 h-3 text-white" />}
+                      <div className="flex items-center min-w-0 flex-1">
+                        {/* Drag Handle for Moving */}
+                        <div 
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', email);
+                            setClipboard({
+                              type: 'cut',
+                              emails: [email],
+                              fromFolderId: activeFolderId
+                            });
+                          }}
+                          title="Click and drag to move to another folder"
+                          className="mr-3 p-1 text-gray-500 hover:text-primary cursor-grab active:cursor-grabbing shrink-0 transition-colors"
+                        >
+                          <GripVertical className="w-4 h-4" />
                         </div>
-                        <span className={`text-sm truncate ${selectedEmails.has(email) ? "text-white font-medium" : "text-gray-300"}`}>{email}</span>
+
+                        {/* Selection Area */}
+                        <div 
+                          className="flex items-center min-w-0 flex-1 h-full py-1"
+                          onMouseDown={(e) => {
+                            if (e.button !== 0) return;
+                            handleStartDragSelection(email, selectedEmails.has(email));
+                          }}
+                        >
+                          <div className={`w-4 h-4 rounded border mr-4 shrink-0 flex items-center justify-center transition-colors ${selectedEmails.has(email) ? "bg-primary border-primary" : "border-gray-700"}`}>
+                            {selectedEmails.has(email) && <Check className="w-3 h-3 text-white" />}
+                          </div>
+                          <span className={`text-sm truncate ${selectedEmails.has(email) ? "text-white font-medium" : "text-gray-300"}`}>{email}</span>
+                        </div>
                       </div>
+                      
                       <div className="flex items-center gap-4">
-                        <span className="text-[10px] text-green-500/70 font-bold bg-green-500/10 px-2 py-0.5 rounded-full flex items-center uppercase tracking-tighter">
+                        <span className="hidden sm:flex text-[10px] text-green-500/70 font-bold bg-green-500/10 px-2 py-0.5 rounded-full items-center uppercase tracking-tighter">
                           <CheckCircle2 className="w-2 h-2 mr-1" /> 
-                          {/* We assume emails in the vault are verified if they came from extraction or import with verify */}
                           MX Verified
                         </span>
                         <MoreVertical className="w-4 h-4 text-gray-700 hover:text-gray-400 shrink-0" />

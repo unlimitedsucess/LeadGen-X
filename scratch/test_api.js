@@ -1,32 +1,19 @@
-const axios = require('axios');
-
-async function triggerApi() {
-    console.log("Triggering API...");
-    try {
-        const payload = {
-            keywords: "real estate",
-            location: "South Africa",
-            source: "linkedin", // this is what page.tsx passes
-            emailProviders: ["gmail", "yahoo", "co_za"],
-            allowCompanyDomain: true,
-            page: 1,
-            turbo: true
-        };
-
-        const res = await axios.post('http://localhost:3000/api/extract', payload, {
-            timeout: 60000
-        });
-
-        console.log("API Response Status:", res.status);
-        if (res.data) {
-            console.log("Success:", res.data.success);
-            console.log("Emails returned:", res.data.count);
-            if (res.data.emails && res.data.emails.length > 0) {
-                console.log(res.data.emails.slice(0, 3));
-            }
-        }
-    } catch(e) {
-        console.error("API error:", e.message);
-    }
+async function test() {
+  try {
+    const res = await fetch('http://localhost:3000/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        keywords: 'marketing',
+        location: 'South Africa',
+        emailProviders: ['gmail.com'],
+        turbo: false
+      })
+    });
+    const data = await res.json();
+    console.log(JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error(e);
+  }
 }
-triggerApi();
+test();

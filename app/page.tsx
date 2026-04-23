@@ -286,20 +286,20 @@ export default function Home() {
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="Search anything (e.g. Real Estate, Tech, Small Business...)"
+                    placeholder="Search anything..."
                     value={keywords}
                     onChange={(e) => setKeywords(e.target.value)}
-                    className="w-full bg-[#0a0a0a]/80 backdrop-blur-xl border-2 border-white/10 rounded-2xl px-6 py-5 text-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-all shadow-2xl"
+                    className="w-full bg-[#0a0a0a]/80 backdrop-blur-xl border-2 border-white/10 rounded-2xl px-4 md:px-6 py-4 md:py-5 text-lg md:text-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-all shadow-2xl"
                   />
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
                     {loading ? (
-                      <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                      <Loader2 className="w-5 h-5 md:w-6 md:h-6 text-primary animate-spin" />
                     ) : null}
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-2">Area / Location</label>
                   <input
@@ -320,8 +320,6 @@ export default function Home() {
                     <option className="text-black" value="web">Multi-Search</option>
                     <option className="text-black" value="linkedin">LinkedIn</option>
                     <option className="text-black" value="github">GitHub</option>
-                    <option className="text-black" value="linkedin">Professionals</option>
-                    <option className="text-black" value="github">Developer Hub</option>
                   </select>
                 </div>
               </div>
@@ -611,35 +609,35 @@ export default function Home() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-lg bg-[#0a0a0a] border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-primary/10"
+              className="relative w-full max-w-lg bg-[#0a0a0a] border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-primary/10 mx-auto"
             >
-              <div className="p-8 pb-0">
-                <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mb-6">
-                  <Save className="w-8 h-8 text-primary" />
+              <div className="p-6 md:p-8 pb-0">
+                <div className="w-12 h-12 md:w-16 md:h-16 bg-primary/20 rounded-2xl flex items-center justify-center mb-4 md:mb-6">
+                  <Save className="w-6 h-6 md:w-8 md:h-8 text-primary" />
                 </div>
-                <h3 className="text-2xl font-bold text-white mb-2">Save {selectedEmails.size} Leads</h3>
-                <p className="text-gray-500 text-sm mb-8">Choose an existing folder or create a new one to organize your leads.</p>
+                <h3 className="text-xl md:text-2xl font-bold text-white mb-2">Save {selectedEmails.size} Leads</h3>
+                <p className="text-gray-500 text-xs md:text-sm mb-6 md:mb-8">Choose an existing folder or create a new one to organize your leads.</p>
               </div>
 
-              <div className="p-8 pt-0 space-y-8">
+              <div className="p-6 md:p-8 pt-0 space-y-6 md:space-y-8">
                 {/* Existing Folders */}
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Existing Folders</label>
-                  <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                  <div className="grid grid-cols-1 gap-2 max-h-40 md:max-h-48 overflow-y-auto custom-scrollbar pr-2">
                     {folders.map(folder => (
                       <button
                         key={folder.id}
                         onClick={() => handleSaveToSpecificFolder(folder.id)}
-                        className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-primary/10 border border-white/5 hover:border-primary/30 rounded-2xl transition-all group"
+                        className="w-full flex items-center justify-between p-3 md:p-4 bg-white/5 hover:bg-primary/10 border border-white/5 hover:border-primary/30 rounded-2xl transition-all group"
                       >
                         <div className="flex items-center">
                           <div className="p-2 bg-white/5 rounded-lg mr-3 group-hover:bg-primary/20">
                             <Plus className="w-4 h-4 text-gray-400 group-hover:text-primary" />
                           </div>
-                          <span className="text-white font-medium">{folder.name}</span>
+                          <span className="text-white text-sm md:text-base font-medium">{folder.name}</span>
                         </div>
-                        <span className="text-xs font-bold text-gray-600 bg-black/40 px-2.5 py-1 rounded-full group-hover:text-primary group-hover:bg-primary/10 transition-colors">
-                          {folder.emails.length} stored
+                        <span className="text-[10px] md:text-xs font-bold text-gray-600 bg-black/40 px-2.5 py-1 rounded-full group-hover:text-primary group-hover:bg-primary/10 transition-colors">
+                          {folder.emails.length}
                         </span>
                       </button>
                     ))}
@@ -651,21 +649,21 @@ export default function Home() {
                 {/* Create New Folder */}
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Or Create New Folder</label>
-                  <div className="flex gap-3">
+                  <div className="flex flex-col sm:flex-row gap-3">
                     <input
                       type="text"
                       value={newFolderName}
                       onChange={(e) => setNewFolderName(e.target.value)}
                       placeholder="Folder name..."
                       onKeyDown={(e) => e.key === 'Enter' && handleCreateAndSave()}
-                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                     />
                     <button
                       onClick={handleCreateAndSave}
                       disabled={!newFolderName.trim()}
-                      className="px-6 py-3 bg-white text-black font-bold rounded-xl hover:opacity-90 disabled:opacity-50 transition-all flex items-center"
+                      className="px-6 py-3 bg-white text-black text-sm font-bold rounded-xl hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center"
                     >
-                      Create & Save
+                      Save
                     </button>
                   </div>
                 </div>

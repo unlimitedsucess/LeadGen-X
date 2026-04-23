@@ -67,12 +67,26 @@ async function verifyEmail(email: string): Promise<boolean> {
 
 async function makeBrowser(): Promise<Browser> {
   const isLocal = !process.env.VERCEL_ENV && !process.env.VERCEL && process.env.NODE_ENV !== 'production';
+  // Use a unique user data dir to avoid EBUSY lockfile issues on Windows
+  const uniqueId = `profile-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   if (isLocal) {
     const puppeteer = require('puppeteer');
+    const path = require('path');
+    const os = require('os');
+    const userDataDir = path.join(os.tmpdir(), `puppeteer_${uniqueId}`);
+
     return puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--window-size=1366,768'],
+      userDataDir,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled',
+        '--window-size=1366,768',
+        '--disable-dev-shm-usage',
+        '--disable-features=IsolateOrigins,site-per-process',
+      ],
     });
   } else {
     const puppeteerCore = require('puppeteer-core');
@@ -137,79 +151,11 @@ async function visitExtract(browser: Browser, url: string, wait = 2000): Promise
 
 // ─── Directory Scrapers ───────────────────────────────────────────────────────
 
-async function scrapeProperty24(browser: Browser, keywords: string, candidates: Set<string>) {
-  const urls = [
-    'https://www.property24.com/real-estate-agents/south-africa',
-    'https://www.property24.com/real-estate-agents/johannesburg/c2',
-    'https://www.property24.com/real-estate-agents/cape-town/c8',
-    'https://www.property24.com/real-estate-agents/durban/c5',
-    'https://www.property24.com/real-estate-agents/pretoria/c3',
-  ];
-  const page = await openPage(browser);
-  for (const url of urls) {
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-      await sleep(2000);
-      const links: string[] = await page.evaluate(() =>
-        [...document.querySelectorAll('a[href*="/agent/"]')].map((a: any) => a.href).slice(0,20)
-      );
-      for (const link of [...new Set(links)]) {
-        const emails = await visitExtract(browser, link, 1500);
-        emails.filter(isGenuine).forEach(e => candidates.add(e));
-        await sleep(400);
-      }
-      (await extractFromPage(page)).filter(isGenuine).forEach(e => candidates.add(e));
-    } catch { /* continue */ }
-    await sleep(800);
-  }
-  await page.close();
-}
-
-async function scrapePrivateProperty(browser: Browser, candidates: Set<string>) {
-  const urls = [
-    'https://www.privateproperty.co.za/estate-agents',
-    'https://www.privateproperty.co.za/estate-agents?area=JHB',
-    'https://www.privateproperty.co.za/estate-agents?area=CPT',
-  ];
-  for (const url of urls) {
-    const emails = await visitExtract(browser, url, 2500);
-    emails.filter(isGenuine).forEach(e => candidates.add(e));
-    await sleep(700);
-  }
-}
-
-async function scrapeBizcommunity(browser: Browser, candidates: Set<string>) {
-  const listingPages = [
-    'https://www.bizcommunity.com/Companies/196/91.html',
-    'https://www.bizcommunity.com/Companies/196/11.html',
-    'https://www.bizcommunity.com/Companies/196/181.html',
-    'https://www.bizcommunity.com/Companies/196/201.html',
-  ];
-  const page = await openPage(browser);
-  for (const url of listingPages) {
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-      await sleep(1500);
-      const companyLinks: string[] = await page.evaluate(() =>
-        [...document.querySelectorAll('a[href*="/Company/"]')].map((a: any) => a.href).slice(0,15)
-      );
-      for (const link of [...new Set(companyLinks)]) {
-        const emails = await visitExtract(browser, link, 1500);
-        emails.filter(isGenuine).forEach(e => candidates.add(e));
-        await sleep(500);
-      }
-      (await extractFromPage(page)).filter(isGenuine).forEach(e => candidates.add(e));
-    } catch { /* continue */ }
-    await sleep(1000);
-  }
-  await page.close();
-}
-
 async function scrapeYellowPages(browser: Browser, keywords: string, candidates: Set<string>, target: number) {
   const page = await openPage(browser);
   for (let p = 1; p <= 5 && candidates.size < target; p++) {
     try {
-      await page.goto(`https://www.yellowpages.co.za/search/?q=${encodeURIComponent(keywords)}&p=${p}`, { waitUntil: 'networkidle2', timeout: 25000 });
+      await page.goto(`https://www.yellowpages.co.za/search/?q=${encodeURIComponent(keywords)}&p=${p}`, { waitUntil: 'domcontentloaded', timeout: 25000 });
       await sleep(1500);
       const links: string[] = await page.evaluate(() =>
         [...document.querySelectorAll('.listing-name a,h2 a,h3 a')].map((a: any) => a.href).filter((h: string) => h?.startsWith('http')).slice(0,10)
@@ -230,7 +176,7 @@ async function scrapeCompanyDirs(browser: Browser, keywords: string, candidates:
   const urls = [
     `https://www.cylex.co.za/search.html?what=${encodeURIComponent(keywords)}`,
     `https://www.hotfrog.co.za/search/south-africa/${encodeURIComponent(keywords.replace(/\s+/g,'%20'))}`,
-    `https://za.kompass.com/a/real-estate-companies/99011/south-africa/za/`,
+    `https://za.kompass.com/a/search?q=${encodeURIComponent(keywords)}`,
     `https://www.brabys.com/search/?q=${encodeURIComponent(keywords + ' South Africa')}`,
   ];
   for (const url of urls) {
@@ -255,6 +201,77 @@ async function provinceSweep(browser: Browser, keywords: string, candidates: Set
   await page.close();
 }
 
+// ─── Search Engine Scrapers (High Yield Dorking) ──────────────────────────────────
+
+// ─── Search Engine Scrapers (High Yield Dorking) ──────────────────────────────────
+
+function buildExpandedQueries(keywords: string, location: string, providers: string[]): string[] {
+  const provs = (providers || ['gmail.com']).map(p => `"${p.includes('@') ? p : '@' + p}"`).join(' OR ');
+  const baseLocation = location.toLowerCase();
+  
+  // High yield dorks
+  const dorks = [
+    `"${keywords}" "${location}" (${provs})`,
+    `site:linkedin.com "${keywords}" "${location}" (${provs})`,
+    `site:facebook.com "${keywords}" "${location}" (${provs})`,
+    `site:instagram.com "${keywords}" "${location}" (${provs})`,
+    `"${keywords}" contact email (${provs}) "${location}"`
+  ];
+
+  return dorks;
+}
+
+async function scrapeBingDorks(browser: Browser, queries: string[], candidates: Set<string>, target: number) {
+  const page = await browser.newPage();
+  await page.setUserAgent(UA);
+  for (const query of queries) {
+    if (candidates.size >= target) break;
+    for (let p = 0; p < 3 && candidates.size < target; p++) {
+      const first = p * 10 + 1;
+      try {
+        await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}&first=${first}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await sleep(1000);
+        const found = await extractFromPage(page);
+        found.filter(isGenuine).forEach(e => candidates.add(e));
+      } catch { /* ignore */ }
+    }
+  }
+  await page.close();
+}
+
+async function scrapeYahooDorks(browser: Browser, queries: string[], candidates: Set<string>, target: number) {
+  const page = await browser.newPage();
+  await page.setUserAgent(UA);
+  for (const query of queries) {
+    if (candidates.size >= target) break;
+    for (let p = 0; p < 3 && candidates.size < target; p++) {
+      const b = p * 10 + 1;
+      try {
+        await page.goto(`https://search.yahoo.com/search?p=${encodeURIComponent(query)}&b=${b}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await sleep(1000);
+        const found = await extractFromPage(page);
+        found.filter(isGenuine).forEach(e => candidates.add(e));
+      } catch { /* ignore */ }
+    }
+  }
+  await page.close();
+}
+
+async function scrapeDDGDorks(browser: Browser, queries: string[], candidates: Set<string>, target: number) {
+  const page = await browser.newPage();
+  await page.setUserAgent(UA);
+  for (const query of queries) {
+    if (candidates.size >= target) break;
+    try {
+      await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await sleep(1000);
+      const found = await extractFromPage(page);
+      found.filter(isGenuine).forEach(e => candidates.add(e));
+    } catch { /* ignore */ }
+  }
+  await page.close();
+}
+
 // ─── Main API Handler ─────────────────────────────────────────────────────────
 
 export const runtime = 'nodejs';
@@ -265,45 +282,37 @@ export async function POST(req: Request) {
   let browser: Browser | null = null;
   try {
     const { keywords, location, emailProviders, allowCompanyDomain, turbo = false } = await req.json();
-    const target = turbo ? 200 : 100;
+    const target = turbo ? 250 : 150;
     const candidates = new Set<string>();
 
     console.log(`Target: ${target} | Query: "${keywords}" in "${location}"`);
+    const expandedQueries = buildExpandedQueries(keywords, location, emailProviders);
+    console.log(`Generated ${expandedQueries.length} Multi-Dork Queries to bypass pagination limits.`);
 
     browser = await makeBrowser();
 
-    // Phase 0: Real estate agent directories
-    console.log('[Phase 0] Property24 & PrivateProperty...');
-    await withTimeout(scrapeProperty24(browser, keywords, candidates), 60000, undefined);
-    await withTimeout(scrapePrivateProperty(browser, candidates), 30000, undefined);
-    console.log(`  → ${candidates.size} candidates`);
+    // Parallel Search Engine Sweeping (Highest Yield & Speed)
+    console.log('[Extraction] Launching Parallel Search Engines (Bing + Yahoo + DDG)...');
+    
+    // Define parallel scrapers
+    const scrapers = [
+      withTimeout(scrapeBingDorks(browser, expandedQueries, candidates, target), 60000, undefined),
+      withTimeout(scrapeYahooDorks(browser, expandedQueries, candidates, target), 60000, undefined),
+      withTimeout(scrapeDDGDorks(browser, expandedQueries, candidates, target), 50000, undefined)
+    ];
 
-    // Phase 1: Bizcommunity
-    if (candidates.size < target) {
-      console.log('[Phase 1] Bizcommunity...');
-      await withTimeout(scrapeBizcommunity(browser, candidates), 90000, undefined);
-      console.log(`  → ${candidates.size} candidates`);
-    }
+    // Run search engines in parallel
+    await Promise.all(scrapers);
+    console.log(`  → After Search Engines: ${candidates.size} candidates`);
 
-    // Phase 2: YellowPages
-    if (candidates.size < target) {
-      console.log('[Phase 2] YellowPages ZA...');
-      await withTimeout(scrapeYellowPages(browser, keywords, candidates, target), 60000, undefined);
-      console.log(`  → ${candidates.size} candidates`);
-    }
-
-    // Phase 3: General company dirs
-    if (candidates.size < target) {
-      console.log('[Phase 3] Cylex / Hotfrog / Kompass / Brabys...');
-      await withTimeout(scrapeCompanyDirs(browser, keywords, candidates), 40000, undefined);
-      console.log(`  → ${candidates.size} candidates`);
-    }
-
-    // Phase 4: Province sweep
-    if (candidates.size < target) {
-      console.log('[Phase 4] Province sweep...');
-      await withTimeout(provinceSweep(browser, keywords, candidates, target), 60000, undefined);
-      console.log(`  → ${candidates.size} candidates`);
+    // Only if we are still short, do the slow fallbacks
+    if (candidates.size < target * 0.4) {
+      console.log('[Fallback] Still low on leads, running directory fallbacks...');
+      const fallbacks = [
+        withTimeout(scrapeYellowPages(browser, `${keywords} ${location}`, candidates, target), 30000, undefined),
+        withTimeout(scrapeCompanyDirs(browser, keywords, candidates), 30000, undefined)
+      ];
+      await Promise.all(fallbacks);
     }
 
     await browser.close();

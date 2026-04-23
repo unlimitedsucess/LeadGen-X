@@ -13,7 +13,10 @@ import {
   X, 
   Search,
   ArrowLeft,
-  Users
+  Users,
+  CheckCircle2 as CheckIcon,
+  Check,
+  Loader2 as LoaderIcon
 } from "lucide-react";
 import Link from 'next/link';
 
@@ -43,6 +46,11 @@ export default function MailerPage() {
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // Drag selection state
+  const [isDraggingSelection, setIsDraggingSelection] = useState(false);
+  const [dragSelectionMode, setDragSelectionMode] = useState<'select' | 'deselect' | null>(null);
+  const scrollRef = useState<HTMLDivElement | null>(null)[0]; // We'll use a ref instead
+
   useEffect(() => {
     const saved = localStorage.getItem("saved_emails");
     if (saved) {
@@ -56,6 +64,13 @@ export default function MailerPage() {
       setFolders(JSON.parse(storedFolders));
     }
     
+    // Global mouse up for drag selection
+    const handleGlobalMouseUp = () => {
+      setIsDraggingSelection(false);
+      setDragSelectionMode(null);
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    
     // Load last used SMTP settings if any
     const lastSender = localStorage.getItem("last_sender_email");
     if (lastSender) setSenderEmail(lastSender);
@@ -63,6 +78,8 @@ export default function MailerPage() {
     if (lastName) setSenderName(lastName);
     const lastReplyTo = localStorage.getItem("last_reply_to");
     if (lastReplyTo) setReplyTo(lastReplyTo);
+
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
   }, []);
 
   const getEmailsToDisplay = () => {
@@ -85,6 +102,51 @@ export default function MailerPage() {
   const selectAll = () => {
     if (selectedRecipients.size === filteredEmails.length) setSelectedRecipients(new Set());
     else setSelectedRecipients(new Set(filteredEmails));
+  };
+
+  const selectCount = (count: number) => {
+    const newSet = new Set(selectedRecipients);
+    let added = 0;
+    for (const email of filteredEmails) {
+      if (!newSet.has(email)) {
+        newSet.add(email);
+        added++;
+      }
+      if (added >= count) break;
+    }
+    setSelectedRecipients(newSet);
+  };
+
+  const handleStartDragSelection = (email: string, isCurrentlySelected: boolean) => {
+    setIsDraggingSelection(true);
+    const newMode = isCurrentlySelected ? 'deselect' : 'select';
+    setDragSelectionMode(newMode);
+    
+    const newSet = new Set(selectedRecipients);
+    if (newMode === 'select') newSet.add(email);
+    else newSet.delete(email);
+    setSelectedRecipients(newSet);
+  };
+
+  const handleMouseEnterEmail = (email: string, e: React.MouseEvent) => {
+    if (!isDraggingSelection || !dragSelectionMode) return;
+    
+    const newSet = new Set(selectedRecipients);
+    if (dragSelectionMode === 'select') newSet.add(email);
+    else newSet.delete(email);
+    setSelectedRecipients(newSet);
+
+    // Auto-scroll logic
+    const container = e.currentTarget.closest('.overflow-y-auto');
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      const threshold = 50;
+      if (e.clientY < rect.top + threshold) {
+        container.scrollTop -= 20;
+      } else if (e.clientY > rect.bottom - threshold) {
+        container.scrollTop += 20;
+      }
+    }
   };
 
   const handleSend = async () => {
@@ -122,9 +184,45 @@ export default function MailerPage() {
       });
 
       const data = await res.json();
+      
+      if (data.success) {
+        // --- MOVE TO SENT LOGIC ---
+        const sentEmails = Array.from(selectedRecipients);
+        const storedFolders = localStorage.getItem("email_folders");
+        
+        if (storedFolders) {
+          let allFolders: EmailFolder[] = JSON.parse(storedFolders);
+          
+          // 1. Remove from all existing folders
+          allFolders = allFolders.map(f => ({
+            ...f,
+            emails: f.emails.filter(e => !selectedRecipients.has(e))
+          }));
+          
+          // 2. Add to "Sent Campaigns" folder
+          let sentFolder = allFolders.find(f => f.name === "Sent Campaigns");
+          if (!sentFolder) {
+            sentFolder = { id: 'sent-' + Date.now(), name: 'Sent Campaigns', emails: [] };
+            allFolders.push(sentFolder);
+          }
+          sentFolder.emails = Array.from(new Set([...sentFolder.emails, ...sentEmails]));
+          
+          // 3. Persist and update state
+          localStorage.setItem("email_folders", JSON.stringify(allFolders));
+          setFolders(allFolders);
+          
+          const newAllEmails = Array.from(new Set(allFolders.flatMap(f => f.emails)));
+          localStorage.setItem("saved_emails", JSON.stringify(newAllEmails));
+          setSavedEmails(newAllEmails);
+          
+          // 4. Clear selection
+          setSelectedRecipients(new Set());
+        }
+      }
+
       setSendResult({
         success: data.success,
-        message: data.success ? data.message : data.error || "Failed to dispatch",
+        message: data.success ? `Success! ${selectedRecipients.size} emails moved to 'Sent Campaigns'` : data.error || "Failed to dispatch",
       });
     } catch (err: any) {
       setSendResult({ success: false, message: err.message || "An error occurred" });
@@ -135,9 +233,9 @@ export default function MailerPage() {
 
   return (
     <main className="max-w-5xl mx-auto p-4 md:p-8">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <Link href="/" className="inline-flex items-center text-sm text-gray-500 hover:text-primary transition-colors mb-4">
+          <Link href="/" className="inline-flex items-center text-sm text-gray-500 hover:text-primary transition-colors mb-2">
             <ArrowLeft className="w-4 h-4 mr-1" />
             Back to Extractions
           </Link>
@@ -145,11 +243,11 @@ export default function MailerPage() {
             Mailer <span className="text-primary italic font-serif">Dashboard</span>
           </h1>
         </div>
-        <div className="flex flex-col items-end">
-          <div className="text-xs text-gray-500 uppercase tracking-widest mb-1">Status</div>
-          <div className="flex items-center space-x-2 bg-white/5 border border-white/10 px-4 py-2 rounded-full">
+        <div className="flex flex-row md:flex-col items-center md:items-end justify-between md:justify-start">
+          <div className="text-[10px] text-gray-500 uppercase tracking-widest md:mb-1">Status</div>
+          <div className="flex items-center space-x-2 bg-white/5 border border-white/10 px-3 py-1.5 md:px-4 md:py-2 rounded-full">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-sm font-medium text-gray-200">Engine Online</span>
+            <span className="text-xs md:text-sm font-medium text-gray-200">Engine Online</span>
           </div>
         </div>
       </div>
@@ -268,17 +366,17 @@ export default function MailerPage() {
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="The perfect hook..."
-                className="w-full bg-transparent border-b border-white/10 py-2 text-xl md:text-2xl font-semibold text-white focus:outline-none focus:border-primary transition-colors placeholder:text-gray-700"
+                className="w-full bg-transparent border-b border-white/10 py-2 text-lg md:text-2xl font-semibold text-white focus:outline-none focus:border-primary transition-colors placeholder:text-gray-700"
               />
             </div>
 
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-[300px]">
               <label className="block text-sm font-medium text-gray-400 mb-2">Message Content</label>
               <textarea
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="Start typing your message here..."
-                className="flex-1 bg-transparent text-gray-300 leading-relaxed resize-none focus:outline-none custom-scrollbar text-lg"
+                className="flex-1 bg-transparent text-gray-300 leading-relaxed resize-none focus:outline-none custom-scrollbar text-base md:text-lg"
               ></textarea>
             </div>
 
@@ -375,20 +473,44 @@ export default function MailerPage() {
                   />
                 </div>
                 
-                <div className="flex justify-between items-center mb-4">
-                  <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">
-                    {filteredEmails.length} Email Addresses
-                  </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">
+                      {filteredEmails.length} Email Addresses
+                    </p>
+                    <div className="flex items-center gap-1 ml-2">
+                      <span className="text-[10px] text-gray-600 uppercase font-bold mr-1">Batch:</span>
+                      {[10, 20, 30, 50].map(count => (
+                        <button
+                          key={count}
+                          onClick={() => selectCount(count)}
+                          className="px-2 py-0.5 bg-white/5 hover:bg-primary/20 border border-white/10 rounded text-[10px] font-bold text-gray-400 hover:text-primary transition-all"
+                        >
+                          {count}
+                        </button>
+                      ))}
+                    </div>
+
+                    {selectedRecipients.size > 0 && (
+                      <motion.div 
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="ml-3 px-3 py-1 bg-primary text-white text-[9px] font-black rounded-full shadow-[0_0_15px_rgba(59,130,246,0.5)] flex items-center"
+                      >
+                        {selectedRecipients.size} RECIPIENTS SELECTED
+                      </motion.div>
+                    )}
+                  </div>
                   <button 
                     onClick={selectAll}
-                    className="text-xs text-primary hover:text-white transition-colors py-1 px-3 rounded-md bg-primary/10"
+                    className="text-xs text-primary hover:text-white transition-colors py-1 px-3 rounded-md bg-primary/10 w-full sm:w-auto"
                   >
                     {selectedRecipients.size === filteredEmails.length ? "Deselect All" : "Select All"}
                   </button>
                 </div>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 pb-6 space-y-2">
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 pb-6 space-y-2 select-none">
                 {filteredEmails.length === 0 ? (
                   <div className="py-12 text-center">
                     <Users className="w-12 h-12 text-gray-800 mx-auto mb-4" />
@@ -400,8 +522,12 @@ export default function MailerPage() {
                       key={email}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: idx * 0.01 }}
-                      onClick={() => toggleRecipient(email)}
+                      transition={{ delay: idx * 0.005 }}
+                      onMouseEnter={(e) => handleMouseEnterEmail(email, e)}
+                      onMouseDown={(e) => {
+                        if (e.button !== 0) return;
+                        handleStartDragSelection(email, selectedRecipients.has(email));
+                      }}
                       className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
                         selectedRecipients.has(email) 
                         ? "bg-primary/20 border-primary shadow-[0_4px_12px_rgba(59,130,246,0.1)]" 
@@ -414,7 +540,7 @@ export default function MailerPage() {
                       <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
                         selectedRecipients.has(email) ? "bg-primary border-primary" : "border-gray-700"
                       }`}>
-                        {selectedRecipients.has(email) && <CheckCircle2 className="w-3 h-3 text-white" />}
+                        {selectedRecipients.has(email) && <Check className="w-3 h-3 text-white" />}
                       </div>
                     </motion.div>
                   ))
