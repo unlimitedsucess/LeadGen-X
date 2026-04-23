@@ -6,9 +6,13 @@ export const runtime = 'nodejs';
 export async function POST(req: Request) {
   console.log("POST /api/send - START");
   try {
-    const body = await req.json();
+    const payload = await req.json();
     console.log("POST /api/send - BODY PARSED");
-    const { emails, subject, body: emailContent, smtpEmail, smtpPassword, replyTo, senderName } = body;
+    let { emails, subject, body: emailContent, smtpEmail, smtpPassword, replyTo, senderName } = payload;
+
+    // Sanitize credentials
+    smtpEmail = smtpEmail?.trim();
+    smtpPassword = smtpPassword?.trim();
 
     if (!emails || !emails.length) {
       return NextResponse.json({ success: false, error: 'No emails provided.' }, { status: 400 });
@@ -17,21 +21,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'SMTP credentials required.' }, { status: 400 });
     }
 
+    // Clean the password (remove spaces often copied from Google UI)
+    const cleanPassword = smtpPassword.replace(/\s+/g, '');
+
     // Configure Nodemailer transporter use Gmail SMTP natively
+    // We force IPv4 (family: 4) to avoid ENETUNREACH errors on some local networks
+    // Configure Nodemailer with explicit Gmail SMTP settings
+    // We use Port 587 (STARTTLS) because Port 465 (SSL) is often blocked by local ISPs
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // Use STARTTLS
       auth: {
         user: smtpEmail,
-        pass: smtpPassword, // Important: This must be an App Password, not the regular Gmail password
+        pass: cleanPassword, 
       },
-    });
+      family: 4
+    } as any);
 
     // Test connection
     try {
       await transporter.verify();
-    } catch (verifyError) {
+    } catch (verifyError: any) {
       console.error('SMTP Connection Error:', verifyError);
-      return NextResponse.json({ success: false, error: 'Failed to connect to SMTP server. Ensure you are using a Gmail App Password.' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false, 
+        error: `Gmail Connection Failed: ${verifyError.message || 'Invalid Credentials'}.` 
+      }, { status: 401 });
     }
 
     const results = [];
@@ -51,9 +67,6 @@ export async function POST(req: Request) {
                     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto;">
                         <div style="padding: 20px; background-color: #ffffff;">
                             ${emailContent.split('\n').map((line: string) => `<p style="margin-bottom: 15px;">${line}</p>`).join('')}
-                        </div>
-                        <div style="padding: 20px; border-top: 1px solid #eeeeee; font-size: 12px; color: #666666; text-align: center;">
-                            Sent via LeadGen X Delivery Engine
                         </div>
                     </div>
                 `,

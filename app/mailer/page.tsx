@@ -34,11 +34,26 @@ export default function MailerPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const [senderName, setSenderName] = useState("");
+  const [senderName, setSenderName] = useState("Felix James Amani");
   const [senderEmail, setSenderEmail] = useState("");
   const [replyTo, setReplyTo] = useState("");
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [subject, setSubject] = useState("Partnership Opportunity: Mineral Supply Chain Collaboration");
+  const [body, setBody] = useState(`Good day ,
+
+I’m reaching out to explore a potential partnership in the sale of coltan stones and palladium minerals in South Africa. We operate a mine
+in the Democratic Republic of Congo and currently have a buyer in South Africa. To facilitate a smooth transaction and an efficient supply
+chain, I am seeking a local partner to assist with the process.
+
+
+We are ready to ship the minerals and would appreciate your involvement.
+
+This is legitimate, be rest assured.
+
+If this opportunity interests you, please send me your contact number
+for us to discuss further on WhatsApp.
+
+Best Regards ,
+Felix James Amani .`);
   
   const [smtpPassword, setSmtpPassword] = useState("");
   const [showSmtpSettings, setShowSmtpSettings] = useState(false);
@@ -149,14 +164,61 @@ export default function MailerPage() {
     }
   };
 
+  const moveToSent = (email: string) => {
+    let storedFolders = localStorage.getItem("email_folders");
+    let allFolders: EmailFolder[] = [];
+    
+    if (storedFolders) {
+      allFolders = JSON.parse(storedFolders);
+    } else {
+      // Initialize folders if they don't exist yet
+      allFolders = [
+        { id: "uncategorized", name: "Uncategorized", emails: savedEmails.filter(e => e !== email) },
+        { id: "sent-" + Date.now(), name: "Sent Campaigns", emails: [] }
+      ];
+    }
+    
+    // 1. Remove from all existing folders
+    allFolders = allFolders.map(f => ({
+      ...f,
+      emails: f.emails.filter(e => e !== email)
+    }));
+    
+    // 2. Add to "Sent Campaigns" folder
+    let sentFolder = allFolders.find(f => f.name === "Sent Campaigns");
+    if (!sentFolder) {
+      sentFolder = { id: 'sent-' + Date.now(), name: 'Sent Campaigns', emails: [] };
+      allFolders.push(sentFolder);
+    }
+    if (!sentFolder.emails.includes(email)) {
+      sentFolder.emails.push(email);
+    }
+    
+    // 3. Persist and update state
+    localStorage.setItem("email_folders", JSON.stringify(allFolders));
+    setFolders(allFolders);
+    
+    const newAllEmails = Array.from(new Set(allFolders.flatMap(f => f.emails)));
+    localStorage.setItem("saved_emails", JSON.stringify(newAllEmails));
+    setSavedEmails(newAllEmails);
+  };
+
   const handleSend = async () => {
     if (selectedRecipients.size === 0) {
-      alert("Please select at least one recipient.");
+      alert("Please select at least one recipient. Click 'Manage List' to choose emails.");
+      return;
+    }
+    if (!subject.trim()) {
+      alert("Please enter a Subject Line.");
+      return;
+    }
+    if (!body.trim()) {
+      alert("Please enter Message Content.");
       return;
     }
     if (!senderEmail || !smtpPassword) {
       setShowSmtpSettings(true);
-      alert("Please configure your SMTP settings.");
+      alert("Please configure your SMTP settings (Email and App Password).");
       return;
     }
 
@@ -175,7 +237,7 @@ export default function MailerPage() {
         body: JSON.stringify({
           emails: Array.from(selectedRecipients),
           subject,
-          body: `Hi,\n\n${body}\n\nBest regards,\n${senderName}`,
+          body: body, // Use the auto-filled body as is
           smtpEmail: senderEmail,
           smtpPassword,
           replyTo,
@@ -186,38 +248,41 @@ export default function MailerPage() {
       const data = await res.json();
       
       if (data.success) {
-        // --- MOVE TO SENT LOGIC ---
+        // --- MOVE TO SENT LOGIC (Bulk) ---
         const sentEmails = Array.from(selectedRecipients);
-        const storedFolders = localStorage.getItem("email_folders");
+        let storedFolders = localStorage.getItem("email_folders");
+        let allFolders: EmailFolder[] = [];
         
         if (storedFolders) {
-          let allFolders: EmailFolder[] = JSON.parse(storedFolders);
-          
-          // 1. Remove from all existing folders
-          allFolders = allFolders.map(f => ({
-            ...f,
-            emails: f.emails.filter(e => !selectedRecipients.has(e))
-          }));
-          
-          // 2. Add to "Sent Campaigns" folder
-          let sentFolder = allFolders.find(f => f.name === "Sent Campaigns");
-          if (!sentFolder) {
-            sentFolder = { id: 'sent-' + Date.now(), name: 'Sent Campaigns', emails: [] };
-            allFolders.push(sentFolder);
-          }
-          sentFolder.emails = Array.from(new Set([...sentFolder.emails, ...sentEmails]));
-          
-          // 3. Persist and update state
-          localStorage.setItem("email_folders", JSON.stringify(allFolders));
-          setFolders(allFolders);
-          
-          const newAllEmails = Array.from(new Set(allFolders.flatMap(f => f.emails)));
-          localStorage.setItem("saved_emails", JSON.stringify(newAllEmails));
-          setSavedEmails(newAllEmails);
-          
-          // 4. Clear selection
-          setSelectedRecipients(new Set());
+          allFolders = JSON.parse(storedFolders);
+        } else {
+          allFolders = [{ id: "uncategorized", name: "Uncategorized", emails: savedEmails }];
         }
+        
+        // 1. Remove from all existing folders
+        allFolders = allFolders.map(f => ({
+          ...f,
+          emails: f.emails.filter(e => !selectedRecipients.has(e))
+        }));
+        
+        // 2. Add to "Sent Campaigns" folder
+        let sentFolder = allFolders.find(f => f.name === "Sent Campaigns");
+        if (!sentFolder) {
+          sentFolder = { id: 'sent-' + Date.now(), name: 'Sent Campaigns', emails: [] };
+          allFolders.push(sentFolder);
+        }
+        sentFolder.emails = Array.from(new Set([...sentFolder.emails, ...sentEmails]));
+        
+        // 3. Persist and update state
+        localStorage.setItem("email_folders", JSON.stringify(allFolders));
+        setFolders(allFolders);
+        
+        const newAllEmails = Array.from(new Set(allFolders.flatMap(f => f.emails)));
+        localStorage.setItem("saved_emails", JSON.stringify(newAllEmails));
+        setSavedEmails(newAllEmails);
+        
+        // 4. Clear selection
+        setSelectedRecipients(new Set());
       }
 
       setSendResult({
@@ -300,28 +365,38 @@ export default function MailerPage() {
                     exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden"
                   >
-                    <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl space-y-4 mt-2 mb-4">
-                      <div>
-                        <label className="block text-[10px] font-bold text-primary uppercase mb-1">Gmail SMTP Address</label>
-                        <input
-                          type="email"
-                          value={senderEmail}
-                          onChange={(e) => setSenderEmail(e.target.value)}
-                          placeholder="you@gmail.com"
-                          className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                        />
+                      <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl space-y-4 mt-2 mb-4">
+                        <div className="text-[10px] text-primary/70 font-medium mb-2 leading-tight">
+                          ⚠️ IMPORTANT: Use a <span className="underline font-bold">16-digit Google App Password</span>. Your regular Gmail login password will not work for security reasons.
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">Gmail SMTP Address</label>
+                          <input
+                            type="email"
+                            value={senderEmail}
+                            onChange={(e) => setSenderEmail(e.target.value)}
+                            placeholder="you@gmail.com"
+                            className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">App Password</label>
+                          <input
+                            type="password"
+                            value={smtpPassword}
+                            onChange={(e) => setSmtpPassword(e.target.value)}
+                            placeholder="16-digit code (e.g. xxxx yyyy zzzz wwww)"
+                            className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <Link 
+                          href="https://myaccount.google.com/apppasswords" 
+                          target="_blank"
+                          className="block text-[10px] text-primary hover:underline font-bold"
+                        >
+                          Generate App Password here ↗
+                        </Link>
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-primary uppercase mb-1">App Password</label>
-                        <input
-                          type="password"
-                          value={smtpPassword}
-                          onChange={(e) => setSmtpPassword(e.target.value)}
-                          placeholder="16-digit code"
-                          className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                        />
-                      </div>
-                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -392,11 +467,14 @@ export default function MailerPage() {
 
             <button
               onClick={handleSend}
-              disabled={sending || selectedRecipients.size === 0 || !subject || !body}
+              disabled={sending}
               className="mt-4 w-full py-5 bg-gradient-to-r from-primary to-accent hover:shadow-[0_0_30px_rgba(59,130,246,0.3)] disabled:opacity-50 disabled:shadow-none transition-all rounded-2xl text-white font-bold text-lg flex justify-center items-center group relative overflow-hidden"
             >
               {sending ? (
-                <Loader2 className="w-6 h-6 animate-spin" />
+                <div className="flex items-center">
+                  <Loader2 className="w-6 h-6 animate-spin mr-3" />
+                  <span>Processing Campaign...</span>
+                </div>
               ) : (
                 <>
                   <Send className="w-5 h-5 mr-2 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
