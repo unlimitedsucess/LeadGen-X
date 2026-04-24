@@ -56,10 +56,13 @@ Best Regards ,
 Felix James Amani .`);
   
   const [smtpPassword, setSmtpPassword] = useState("");
+  const [smtpHost, setSmtpHost] = useState("smtp.gmail.com");
+  const [smtpPort, setSmtpPort] = useState("465");
   const [showSmtpSettings, setShowSmtpSettings] = useState(false);
   
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isPlainText, setIsPlainText] = useState(true);
 
   // Drag selection state
   const [isDraggingSelection, setIsDraggingSelection] = useState(false);
@@ -93,6 +96,10 @@ Felix James Amani .`);
     if (lastName) setSenderName(lastName);
     const lastReplyTo = localStorage.getItem("last_reply_to");
     if (lastReplyTo) setReplyTo(lastReplyTo);
+    const lastHost = localStorage.getItem("last_smtp_host");
+    if (lastHost) setSmtpHost(lastHost);
+    const lastPort = localStorage.getItem("last_smtp_port");
+    if (lastPort) setSmtpPort(lastPort);
 
     return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
   }, []);
@@ -229,6 +236,8 @@ Felix James Amani .`);
     localStorage.setItem("last_sender_email", senderEmail);
     localStorage.setItem("last_sender_name", senderName);
     localStorage.setItem("last_reply_to", replyTo);
+    localStorage.setItem("last_smtp_host", smtpHost);
+    localStorage.setItem("last_smtp_port", smtpPort);
 
     try {
       const res = await fetch("/api/send", {
@@ -240,8 +249,11 @@ Felix James Amani .`);
           body: body, // Use the auto-filled body as is
           smtpEmail: senderEmail,
           smtpPassword,
+          smtpHost,
+          smtpPort,
           replyTo,
-          senderName
+          senderName,
+          isPlainText
         }),
       });
 
@@ -370,7 +382,35 @@ Felix James Amani .`);
                           ⚠️ IMPORTANT: Use a <span className="underline font-bold">16-digit Google App Password</span>. Your regular Gmail login password will not work for security reasons.
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">Gmail SMTP Address</label>
+                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">SMTP Host</label>
+                          <input
+                            type="text"
+                            value={smtpHost}
+                            onChange={(e) => setSmtpHost(e.target.value)}
+                            placeholder="e.g. smtp.gmail.com"
+                            className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-primary uppercase mb-1">Port</label>
+                            <input
+                              type="text"
+                              value={smtpPort}
+                              onChange={(e) => setSmtpPort(e.target.value)}
+                              placeholder="465 or 587"
+                              className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-primary uppercase mb-1">Method</label>
+                            <div className="px-3 py-2 text-[10px] text-gray-500 bg-white/5 rounded-lg border border-white/5">
+                              {smtpPort === "465" ? "SSL/TLS" : "STARTTLS"}
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">SMTP Username / Email</label>
                           <input
                             type="email"
                             value={senderEmail}
@@ -423,11 +463,31 @@ Felix James Amani .`);
           <section className="p-6 bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 rounded-2xl">
               <h3 className="text-sm font-bold text-white mb-2 flex items-center">
                 <CheckCircle2 className="w-4 h-4 mr-2 text-green-400" />
-                Ready to Send
+                Gmail Protection Active
               </h3>
-              <p className="text-xs text-gray-400 leading-relaxed">
-                Your messages will be dispatched individually to each recipient to maximize deliverability and avoid spam filters.
-              </p>
+              <div className="space-y-3">
+                <div className="flex items-center space-x-3 p-3 bg-white/5 rounded-xl border border-white/10 hover:border-primary/50 transition-colors cursor-pointer" onClick={() => setIsPlainText(!isPlainText)}>
+                  <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${isPlainText ? "bg-primary border-primary" : "border-gray-600"}`}>
+                    {isPlainText && <Check className="w-3 h-3 text-white" />}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white leading-none mb-1">Send as Plain Text</div>
+                    <div className="text-[9px] text-gray-500">Highest deliverability for Gmail</div>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  We've enabled <span className="text-primary font-bold">randomized fingerprinting</span> and <span className="text-primary font-bold">cooldown breaks</span> (every 10 emails) to protect your account.
+                </p>
+                <div className="p-3 bg-black/30 rounded-lg border border-white/5">
+                  <p className="text-[10px] font-bold text-primary uppercase mb-1">💡 Pro Tips:</p>
+                  <ul className="text-[10px] text-gray-500 space-y-1 list-disc pl-3">
+                    <li>Use <b>App Passwords</b> (16 digits).</li>
+                    <li>Keep the <b>Plain Text</b> box checked.</li>
+                    <li>Limit to 50-100 emails per day.</li>
+                  </ul>
+                </div>
+              </div>
           </section>
         </div>
 
