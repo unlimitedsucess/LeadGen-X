@@ -223,9 +223,9 @@ Felix James Amani .`);
       alert("Please enter Message Content.");
       return;
     }
-    if (!senderEmail || !smtpPassword) {
+    if (!senderEmail) {
       setShowSmtpSettings(true);
-      alert("Please configure your SMTP settings (Email and App Password).");
+      alert("Please enter your Verified Brevo Sender Email.");
       return;
     }
 
@@ -332,7 +332,13 @@ Felix James Amani .`);
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Configuration Column */}
         <div className="lg:col-span-1 space-y-6">
-          <section className="glass-panel p-6 rounded-2xl">
+          <section className="glass-panel p-6 rounded-2xl relative overflow-hidden">
+            {/* Status indicator for Brevo */}
+            <div className="absolute top-0 right-0 px-3 py-1 bg-green-500/10 border-b border-l border-green-500/20 rounded-bl-xl flex items-center">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mr-2"></div>
+              <span className="text-[10px] font-bold text-green-400 uppercase tracking-tight">Brevo API Active</span>
+            </div>
+
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-semibold text-white flex items-center">
                 <User className="w-5 h-5 mr-2 text-primary" />
@@ -341,6 +347,7 @@ Felix James Amani .`);
               <button 
                 onClick={() => setShowSmtpSettings(!showSmtpSettings)}
                 className="p-2 hover:bg-white/5 rounded-lg transition-colors text-gray-400"
+                title="Configuration"
               >
                 <Settings className="w-5 h-5" />
               </button>
@@ -359,12 +366,24 @@ Felix James Amani .`);
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-400 mb-1">Reply-To Email</label>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Verified Brevo Sender Email</label>
+                <input
+                  type="email"
+                  value={senderEmail}
+                  onChange={(e) => setSenderEmail(e.target.value)}
+                  placeholder="e.g. support@elgreenglobal.com"
+                  className="w-full bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                />
+                <p className="text-[9px] text-gray-500 mt-1 ml-1">Must be the email or domain verified in Brevo.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Reply-To Email (Where you receive answers)</label>
                 <input
                   type="email"
                   value={replyTo}
                   onChange={(e) => setReplyTo(e.target.value)}
-                  placeholder="e.g. support@yourbrand.com"
+                  placeholder="e.g. yourname@gmail.com"
                   className="w-full bg-input/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                 />
               </div>
@@ -377,69 +396,46 @@ Felix James Amani .`);
                     exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden"
                   >
-                      <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl space-y-4 mt-2 mb-4">
-                        <div className="text-[10px] text-primary/70 font-medium mb-2 leading-tight">
-                          ⚠️ IMPORTANT: Use a <span className="underline font-bold">16-digit Google App Password</span>. Your regular Gmail login password will not work for security reasons.
+                      <div className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-4 mt-2 mb-4">
+                        <div className="text-[10px] text-gray-500 font-medium mb-2 leading-tight">
+                          Note: Professional API mode is enabled. Manual SMTP settings below are currently ignored.
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">SMTP Host</label>
-                          <input
-                            type="text"
-                            value={smtpHost}
-                            onChange={(e) => setSmtpHost(e.target.value)}
-                            placeholder="e.g. smtp.gmail.com"
-                            className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="opacity-40 pointer-events-none">
                           <div>
-                            <label className="block text-[10px] font-bold text-primary uppercase mb-1">Port</label>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">SMTP Host (Ignored)</label>
                             <input
                               type="text"
-                              value={smtpPort}
-                              onChange={(e) => setSmtpPort(e.target.value)}
-                              placeholder="465 or 587"
-                              className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                              value={smtpHost}
+                              readOnly
+                              className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-500"
                             />
                           </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-primary uppercase mb-1">Method</label>
-                            <div className="px-3 py-2 text-[10px] text-gray-500 bg-white/5 rounded-lg border border-white/5">
-                              {smtpPort === "465" ? "SSL/TLS" : "STARTTLS"}
+                          <div className="grid grid-cols-2 gap-2 mt-2">
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Port</label>
+                              <input
+                                type="text"
+                                value={smtpPort}
+                                readOnly
+                                className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Password</label>
+                              <input
+                                type="password"
+                                value="********"
+                                readOnly
+                                className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-500"
+                              />
                             </div>
                           </div>
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">SMTP Username / Email</label>
-                          <input
-                            type="email"
-                            value={senderEmail}
-                            onChange={(e) => setSenderEmail(e.target.value)}
-                            placeholder="you@gmail.com"
-                            className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-primary uppercase mb-1">App Password</label>
-                          <input
-                            type="password"
-                            value={smtpPassword}
-                            onChange={(e) => setSmtpPassword(e.target.value)}
-                            placeholder="16-digit code (e.g. xxxx yyyy zzzz wwww)"
-                            className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                          />
-                        </div>
-                        <Link 
-                          href="https://myaccount.google.com/apppasswords" 
-                          target="_blank"
-                          className="block text-[10px] text-primary hover:underline font-bold"
-                        >
-                          Generate App Password here ↗
-                        </Link>
                       </div>
                   </motion.div>
                 )}
               </AnimatePresence>
+
 
               <div className="p-4 bg-white/5 border border-dashed border-white/10 rounded-xl">
                 <div className="flex justify-between items-center mb-4">

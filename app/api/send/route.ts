@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 
 export const runtime = 'nodejs';
@@ -28,67 +27,52 @@ function autoDiversify(text: string): string {
   return diversified;
 }
 
+async function sendViaBrevo(payload: any) {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) throw new Error('BREVO_API_KEY not found in environment');
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Brevo API error');
+  }
+
+  return await response.json();
+}
+
 export async function POST(req: Request) {
-  console.log("POST /api/send - START");
+  console.log("POST /api/send (Brevo Edition) - START");
   try {
     const payload = await req.json();
-    console.log("POST /api/send - BODY PARSED");
     let { 
       emails, 
       subject, 
       body: emailContent, 
-      smtpEmail, 
-      smtpPassword, 
-      smtpHost = 'smtp.gmail.com', 
-      smtpPort = 465, 
-      replyTo, 
+      smtpEmail, // We'll use this as the 'from' email if provided
+      replyTo,
       senderName,
       isPlainText = false
     } = payload;
 
-    // Sanitize credentials
-    smtpEmail = smtpEmail?.trim();
-    smtpPassword = smtpPassword?.trim();
-
     if (!emails || !emails.length) {
       return NextResponse.json({ success: false, error: 'No emails provided.' }, { status: 400 });
     }
-    if (!smtpEmail || !smtpPassword) {
-      return NextResponse.json({ success: false, error: 'SMTP credentials required.' }, { status: 400 });
-    }
 
-    // Clean the password (remove spaces often copied from Google UI)
-    const cleanPassword = smtpPassword.replace(/\s+/g, '');
-
-    // Configure Nodemailer transporter
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: Number(smtpPort),
-      secure: Number(smtpPort) === 465, 
-      auth: {
-        user: smtpEmail,
-        pass: cleanPassword, 
-      },
-      family: 4,
-      connectionTimeout: 15000, 
-      greetingTimeout: 15000,
-      socketTimeout: 15000
-    } as any);
-
-    // Test connection
-    try {
-      await transporter.verify();
-    } catch (verifyError: any) {
-      console.error('SMTP Connection Error:', verifyError);
-      return NextResponse.json({ 
-        success: false, 
-        error: `Gmail Connection Failed: ${verifyError.message || 'Invalid Credentials'}.` 
-      }, { status: 401 });
-    }
-
-    const results = [];
     const total = emails.length;
+    let successCount = 0;
+    let failCount = 0;
     
+    console.log(`Starting Brevo campaign for ${total} recipients...`);
+
     for (let i = 0; i < total; i++) {
         const recipient = emails[i];
         try {
@@ -100,59 +84,60 @@ export async function POST(req: Request) {
             // 2. Simple Personalization
             variantBody = variantBody.replace(/{{email}}/g, recipient);
             
-            // 3. Generate a unique fingerprint for this specific email
+            // 3. Generate a unique fingerprint
             const fingerprint = crypto.randomUUID().substring(0, 8);
-
-            // 4. Add a subtle unique identifier to the subject to bypass Gmail's "duplicate" detection
             variantSubject = `${variantSubject} [Ref: ${fingerprint.substring(0, 4)}]`;
 
-            const mailOptions: any = {
-                from: senderName ? `"${senderName}" <${smtpEmail}>` : smtpEmail,
-                to: recipient,
-                replyTo: replyTo || smtpEmail,
+            // 4. Prepare Brevo Payload
+            const brevoPayload: any = {
+                sender: { 
+                  name: senderName || 'Outreach Team', 
+                  email: smtpEmail // This MUST be a verified sender in Brevo
+                },
+                to: [{ email: recipient }],
+                replyTo: replyTo ? { email: replyTo } : undefined,
                 subject: variantSubject,
-                text: `${variantBody}\n\n--\nRef: ${fingerprint}`,
-            };
+              };
 
-            // Only add HTML if plain text mode is OFF
-            if (!isPlainText) {
-                mailOptions.html = `
-                    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto;">
-                        <div style="padding: 20px; background-color: #ffffff;">
-                            ${variantBody.split('\n').map((line: string) => `<p style="margin-bottom: 15px;">${line}</p>`).join('')}
-                        </div>
-                        <div style="padding: 20px; border-top: 1px solid #eeeeee; font-size: 12px; color: #999999; text-align: center;">
-                            <p>Sent by ${senderName || smtpEmail} regarding partnership inquiry.</p>
-                            <p>Ref: ${fingerprint} | <a href="#" style="color: #999999; text-decoration: underline;">Unsubscribe</a></p>
-                        </div>
+            if (isPlainText) {
+              brevoPayload.textContent = `${variantBody}\n\n--\nRef: ${fingerprint}`;
+            } else {
+              brevoPayload.htmlContent = `
+                <div style="font-family: sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto;">
+                    <div style="padding: 20px; background-color: #ffffff;">
+                        ${variantBody.split('\n').map((line: string) => `<p style="margin-bottom: 15px;">${line}</p>`).join('')}
                     </div>
-                `;
+                    <div style="padding: 20px; border-top: 1px solid #eeeeee; font-size: 11px; color: #999999; text-align: center;">
+                        <p>Ref: ${fingerprint} | Sent by ${senderName || smtpEmail}</p>
+                        <p><a href="#" style="color: #999999;">Unsubscribe</a></p>
+                    </div>
+                </div>
+              `;
             }
 
-            await transporter.sendMail(mailOptions);
-            console.log(`[${i+1}/${total}] Successfully sent to ${recipient}`);
+            await sendViaBrevo(brevoPayload);
+            successCount++;
+            console.log(`[${i+1}/${total}] Sent to ${recipient}`);
             
-            // 5. More aggressive and variable delays
+            // 5. Anti-spam delays (Brevo is faster but we should still be careful)
             if (i < total - 1) {
-                // Take a longer break every 10 emails (Cool down)
-                const isCooldown = (i + 1) % 10 === 0;
-                const delay = isCooldown ? (20000 + Math.random() * 10000) : (4000 + Math.random() * 8000);
-                
-                console.log(`Waiting ${Math.round(delay/1000)}s before next send... ${isCooldown ? '(Cooling down)' : ''}`);
+                const delay = (i + 1) % 15 === 0 ? 5000 : 800; // Smaller delays for professional API
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
-        } catch (sendError) {
-            console.error(`Failed to send to ${recipient}:`, sendError);
+        } catch (sendError: any) {
+            failCount++;
+            console.error(`Failed to send to ${recipient}:`, sendError.message);
         }
     }
 
     return NextResponse.json({ 
         success: true, 
-        message: `Campaign complete. Processed ${total} recipients with anti-spam randomization.` 
+        message: `Campaign complete. Sent: ${successCount}, Failed: ${failCount}` 
     });
 
   } catch (error: any) {
-    console.error('Error sending emails:', error);
-    return NextResponse.json({ success: false, error: error?.message || 'Failed to send emails.' }, { status: 500 });
+    console.error('Critical Error:', error);
+    return NextResponse.json({ success: false, error: error?.message || 'Failed to initiate campaign.' }, { status: 500 });
   }
 }
+
