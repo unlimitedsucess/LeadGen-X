@@ -43,14 +43,26 @@ async function sendViaBrevo(payload: any) {
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.message || 'Brevo API error');
+    console.error(`Brevo API Error [${response.status}]:`, JSON.stringify(error, null, 2));
+    throw new Error(error.message || `Brevo API error (${response.status})`);
   }
 
   return await response.json();
 }
 
+export async function GET() {
+  return NextResponse.json({ 
+    status: 'online', 
+    engine: 'Brevo',
+    key_configured: !!process.env.BREVO_API_KEY 
+  });
+}
+
 export async function POST(req: Request) {
-  console.log("POST /api/send (Brevo Edition) - START");
+  console.log("-----------------------------------------");
+  console.log("POST /api/send - INCOMING REQUEST");
+  console.log("BREVO_API_KEY status:", process.env.BREVO_API_KEY ? "CONFIGURED (Len: " + process.env.BREVO_API_KEY.length + ")" : "MISSING");
+  console.log("-----------------------------------------");
   try {
     const payload = await req.json();
     let { 
@@ -71,7 +83,11 @@ export async function POST(req: Request) {
     let successCount = 0;
     let failCount = 0;
     
-    console.log(`Starting Brevo campaign for ${total} recipients...`);
+    console.log(`Starting Brevo campaign for ${total} recipients using sender: ${smtpEmail}`);
+
+    if (!process.env.BREVO_API_KEY) {
+        console.error("CRITICAL: BREVO_API_KEY is missing from environment variables!");
+    }
 
     for (let i = 0; i < total; i++) {
         const recipient = emails[i];
@@ -115,9 +131,9 @@ export async function POST(req: Request) {
               `;
             }
 
-            await sendViaBrevo(brevoPayload);
+            const result = await sendViaBrevo(brevoPayload);
             successCount++;
-            console.log(`[${i+1}/${total}] Sent to ${recipient}`);
+            console.log(`[${i+1}/${total}] Sent to ${recipient} - MessageID: ${result.messageId}`);
             
             // 5. Anti-spam delays (Brevo is faster but we should still be careful)
             if (i < total - 1) {
@@ -127,12 +143,14 @@ export async function POST(req: Request) {
         } catch (sendError: any) {
             failCount++;
             console.error(`Failed to send to ${recipient}:`, sendError.message);
+            // We'll return the last error if all failed or some failed
         }
     }
 
+    const overallSuccess = successCount > 0;
     return NextResponse.json({ 
-        success: true, 
-        message: `Campaign complete. Sent: ${successCount}, Failed: ${failCount}` 
+        success: overallSuccess, 
+        message: `Campaign complete. Sent: ${successCount}, Failed: ${failCount}${failCount > 0 ? '. Check server logs for details.' : ''}` 
     });
 
   } catch (error: any) {
